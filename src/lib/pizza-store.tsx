@@ -287,8 +287,9 @@ export function PizzaProvider({ children }: { children: ReactNode }) {
 
   /* --------------------------- carga inicial --------------------------- */
   const load = useCallback(async () => {
-    const [pedidos, cupons, config, estoqueData, receitasData, clientesData, movData, menuData] = await Promise.all([
-      supabase.from("pedidos" as any).select("*").order("created_at", { ascending: false }).limit(500),
+    const [pedidos, itensData, cupons, config, estoqueData, receitasData, clientesData, movData, menuData] = await Promise.all([
+      supabase.from("orders" as any).select("*").order("created_at", { ascending: false }).limit(500),
+      supabase.from("order_items" as any).select("*").limit(3000),
       supabase.from("cupons").select("*").order("created_at", { ascending: false }),
       supabase.from("configuracoes_loja").select("*").limit(1).maybeSingle(),
       supabase.from("estoque").select("*").order("nome"),
@@ -298,7 +299,7 @@ export function PizzaProvider({ children }: { children: ReactNode }) {
       supabase.from("menu_items").select("*").order("nome"),
     ]);
 
-    const loadErrors = [pedidos, cupons, estoqueData, receitasData, clientesData, movData, menuData]
+    const loadErrors = [pedidos, itensData, cupons, estoqueData, receitasData, clientesData, movData, menuData]
       .map((result) => result.error)
       .filter(Boolean);
     if (loadErrors.length > 0) {
@@ -309,7 +310,13 @@ export function PizzaProvider({ children }: { children: ReactNode }) {
     }
 
     if (pedidos.data) {
-      setAllOrders(pedidos.data.map((row: any) => mapSiteOrder(row, Array.isArray(row.itens) ? row.itens : [])));
+      const itemsByOrder = new Map<string, any[]>();
+      for (const item of (itensData.data ?? []) as any[]) {
+        const list = itemsByOrder.get(String(item.order_id)) ?? [];
+        list.push(item);
+        itemsByOrder.set(String(item.order_id), list);
+      }
+      setAllOrders(pedidos.data.map((row: any) => mapSiteOrder(row, itemsByOrder.get(String(row.id)) ?? [])));
     }
     if (cupons.data) setCoupons(cupons.data.map(mapCoupon));
     if (estoqueData.data) {
