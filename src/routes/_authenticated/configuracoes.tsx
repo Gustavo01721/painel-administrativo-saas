@@ -68,7 +68,7 @@ function ConfiguracoesPage() {
       .from("motoboys" as any)
       .select("id,nome,whatsapp,ativo")
       .order("nome")
-      .then(({ data }) => setMotoboys((data ?? []) as Motoboy[]));
+      .then(({ data }) => setMotoboys((data ?? []) as unknown as Motoboy[]));
   }, []);
 
   const adicionarMotoboy = async () => {
@@ -82,7 +82,7 @@ function ConfiguracoesPage() {
       .select("id,nome,whatsapp,ativo")
       .single();
     if (error || !data) { toast.error(error?.message ?? "Não foi possível adicionar"); return; }
-    setMotoboys((prev) => [...prev, data as Motoboy].sort((a, b) => a.nome.localeCompare(b.nome)));
+    setMotoboys((prev) => [...prev, data as unknown as Motoboy].sort((a, b) => a.nome.localeCompare(b.nome)));
     setNovoMotoboy({ nome: "", whatsapp: "" });
     toast.success("Motoboy adicionado");
   };

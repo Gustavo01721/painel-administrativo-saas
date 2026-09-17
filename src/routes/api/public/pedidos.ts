@@ -159,7 +159,7 @@ export const Route = createFileRoute("/api/public/pedidos")({
         if (data.mesa_id) {
           const { error: mesaError } = await supabaseAdmin
             .from("pedidos")
-            .update({ mesa_id: data.mesa_id })
+            .update({ mesa_id: data.mesa_id } as any)
             .eq("id", resData.pedido_id)
             .eq("store_id", apiKeyEntry.store_id);
           if (mesaError) {

@@ -48,7 +48,7 @@ const colTone: Record<OrderStatus, string> = {
 function PedidosPage() {
   const { orders, setOrderStatus, removeOrder, search } = usePizza();
   const [motoboys, setMotoboys] = useState<Motoboy[]>([]);
-  useEffect(() => { void supabase.from("motoboys" as any).select("id,nome,whatsapp,ativo").eq("ativo", true).order("nome").then(({ data }) => setMotoboys((data ?? []) as Motoboy[])); }, []);
+  useEffect(() => { void supabase.from("motoboys" as any).select("id,nome,whatsapp,ativo").eq("ativo", true).order("nome").then(({ data }) => setMotoboys((data ?? []) as unknown as Motoboy[])); }, []);
   const [canal, setCanal] = useState<"todos" | "delivery" | "retirada">("todos");
 
   const q = search.trim().toLowerCase();
