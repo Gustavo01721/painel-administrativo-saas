@@ -158,6 +158,7 @@ const localIso = (d: Date) =>
   new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 
 function mapOrder(row: T_PEDIDO): Order {
+  const status = row.status === "em_preparo" || row.status === "pendente" ? "novo" : (row.status ?? "novo");
   return {
     id: row.id,
     numero: row.numero,
@@ -173,7 +174,7 @@ function mapOrder(row: T_PEDIDO): Order {
     desconto: Number(row.desconto ?? 0),
     taxaEntrega: Number(row.taxa_entrega ?? 0),
     total: Number(row.total ?? 0),
-    status: (row.status ?? "novo") as OrderStatus,
+    status: status as OrderStatus,
     motoboyId: (row as { motoboy_id?: string | null }).motoboy_id ?? null,
     origem: row.origem ?? "site",
     observacao: row.observacao ?? "",
