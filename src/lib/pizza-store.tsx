@@ -423,7 +423,7 @@ export function PizzaProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const channel = supabase
       .channel("painel-fornalha")
-      .on("postgres_changes", { event: "*", schema: "public", table: "orders" }, (payload) => {
+      .on("postgres_changes", { event: "*", schema: "public", table: "pedidos" }, (payload) => {
         if (payload.eventType === "INSERT") {
           const o = mapSiteOrder(payload.new);
           setAllOrders((prev) => (prev.some((p) => p.id === o.id) ? prev : [o, ...prev]));
