@@ -1,0 +1,1876 @@
+-- ============================================================
+-- Migration: 20260729121043_82de3a36-f510-4ddf-a24f-13bdb5872bfd.sql
+-- ============================================================
+
+CREATE TABLE public.cupons (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  codigo text NOT NULL UNIQUE,
+  tipo text NOT NULL DEFAULT 'percentual',
+  valor numeric NOT NULL DEFAULT 0,
+  brinde text NOT NULL DEFAULT '',
+  minimo numeric NOT NULL DEFAULT 0,
+  limite_total integer NOT NULL DEFAULT 0,
+  limite_por_cliente integer NOT NULL DEFAULT 1,
+  canal text NOT NULL DEFAULT 'todos',
+  dias integer[] NOT NULL DEFAULT '{}',
+  inicio timestamptz NOT NULL DEFAULT now(),
+  fim timestamptz NOT NULL DEFAULT (now() + interval '30 days'),
+  ativo boolean NOT NULL DEFAULT true,
+  banner_url text,
+  banner_path text,
+  posicao text NOT NULL DEFAULT 'checkout',
+  descricao text NOT NULL DEFAULT '',
+  usos integer NOT NULL DEFAULT 0,
+  receita_gerada numeric NOT NULL DEFAULT 0,
+  desconto_concedido numeric NOT NULL DEFAULT 0,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.cupons TO authenticated;
+GRANT SELECT ON public.cupons TO anon;
+GRANT ALL ON public.cupons TO service_role;
+ALTER TABLE public.cupons ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Cupons ativos sao publicos" ON public.cupons FOR SELECT TO anon
+  USING (ativo = true AND now() BETWEEN inicio AND fim);
+CREATE POLICY "Painel le cupons" ON public.cupons FOR SELECT TO authenticated USING (true);
+CREATE POLICY "Painel cria cupons" ON public.cupons FOR INSERT TO authenticated WITH CHECK (true);
+CREATE POLICY "Painel edita cupons" ON public.cupons FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "Painel apaga cupons" ON public.cupons FOR DELETE TO authenticated USING (true);
+
+CREATE TABLE public.pedidos (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  numero text NOT NULL UNIQUE,
+  cliente text NOT NULL,
+  telefone text NOT NULL DEFAULT '',
+  endereco text NOT NULL DEFAULT '',
+  canal text NOT NULL DEFAULT 'delivery',
+  pagamento text NOT NULL DEFAULT 'pix',
+  cupom_codigo text,
+  itens jsonb NOT NULL DEFAULT '[]'::jsonb,
+  subtotal numeric NOT NULL DEFAULT 0,
+  desconto numeric NOT NULL DEFAULT 0,
+  taxa_entrega numeric NOT NULL DEFAULT 0,
+  total numeric NOT NULL DEFAULT 0,
+  status text NOT NULL DEFAULT 'novo',
+  origem text NOT NULL DEFAULT 'site',
+  observacao text NOT NULL DEFAULT '',
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX pedidos_created_at_idx ON public.pedidos (created_at DESC);
+CREATE INDEX pedidos_status_idx ON public.pedidos (status);
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.pedidos TO authenticated;
+GRANT ALL ON public.pedidos TO service_role;
+ALTER TABLE public.pedidos ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Painel le pedidos" ON public.pedidos FOR SELECT TO authenticated USING (true);
+CREATE POLICY "Painel cria pedidos" ON public.pedidos FOR INSERT TO authenticated WITH CHECK (true);
+CREATE POLICY "Painel edita pedidos" ON public.pedidos FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "Painel apaga pedidos" ON public.pedidos FOR DELETE TO authenticated USING (true);
+
+CREATE TABLE public.configuracoes_loja (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  loja text NOT NULL DEFAULT 'Fornalha Pizzaria',
+  responsavel text NOT NULL DEFAULT 'Gerente',
+  telefone text NOT NULL DEFAULT '',
+  endereco text NOT NULL DEFAULT '',
+  meta_faturamento numeric NOT NULL DEFAULT 180000,
+  taxa_entrega numeric NOT NULL DEFAULT 8,
+  tempo_preparo integer NOT NULL DEFAULT 32,
+  loja_aberta boolean NOT NULL DEFAULT true,
+  auto_whatsapp boolean NOT NULL DEFAULT true,
+  auto_inativos boolean NOT NULL DEFAULT true,
+  auto_aniversario boolean NOT NULL DEFAULT false,
+  webhook_retorno text NOT NULL DEFAULT '',
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+GRANT SELECT, INSERT, UPDATE ON public.configuracoes_loja TO authenticated;
+GRANT ALL ON public.configuracoes_loja TO service_role;
+ALTER TABLE public.configuracoes_loja ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Painel le config" ON public.configuracoes_loja FOR SELECT TO authenticated USING (true);
+CREATE POLICY "Painel cria config" ON public.configuracoes_loja FOR INSERT TO authenticated WITH CHECK (true);
+CREATE POLICY "Painel edita config" ON public.configuracoes_loja FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+
+CREATE TABLE public.webhook_logs (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  evento text NOT NULL,
+  status integer NOT NULL DEFAULT 200,
+  mensagem text NOT NULL DEFAULT '',
+  payload jsonb,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+GRANT SELECT, DELETE ON public.webhook_logs TO authenticated;
+GRANT ALL ON public.webhook_logs TO service_role;
+ALTER TABLE public.webhook_logs ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Painel le logs" ON public.webhook_logs FOR SELECT TO authenticated USING (true);
+CREATE POLICY "Painel apaga logs" ON public.webhook_logs FOR DELETE TO authenticated USING (true);
+
+CREATE OR REPLACE FUNCTION public.set_updated_at()
+RETURNS TRIGGER LANGUAGE plpgsql SET search_path = public AS $$
+BEGIN NEW.updated_at = now(); RETURN NEW; END; $$;
+
+CREATE TRIGGER cupons_updated_at BEFORE UPDATE ON public.cupons
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+CREATE TRIGGER pedidos_updated_at BEFORE UPDATE ON public.pedidos
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+CREATE TRIGGER config_updated_at BEFORE UPDATE ON public.configuracoes_loja
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+ALTER TABLE public.pedidos REPLICA IDENTITY FULL;
+ALTER TABLE public.cupons REPLICA IDENTITY FULL;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.pedidos;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.cupons;
+
+CREATE POLICY "Painel le banners" ON storage.objects FOR SELECT TO authenticated
+  USING (bucket_id = 'promo-banners');
+CREATE POLICY "Painel envia banners" ON storage.objects FOR INSERT TO authenticated
+  WITH CHECK (bucket_id = 'promo-banners');
+CREATE POLICY "Painel atualiza banners" ON storage.objects FOR UPDATE TO authenticated
+  USING (bucket_id = 'promo-banners') WITH CHECK (bucket_id = 'promo-banners');
+CREATE POLICY "Painel apaga banners" ON storage.objects FOR DELETE TO authenticated
+  USING (bucket_id = 'promo-banners');
+
+INSERT INTO public.configuracoes_loja (loja, responsavel, telefone, endereco, meta_faturamento, taxa_entrega)
+VALUES ('Fornalha Pizzaria', 'Guilherme Prado', '(11) 3344-9080', 'Rua das Oliveiras, 214 - São Paulo/SP', 180000, 8);
+
+INSERT INTO public.cupons (codigo, tipo, valor, brinde, minimo, limite_total, limite_por_cliente, canal, dias, inicio, fim, ativo, posicao, descricao, usos, receita_gerada, desconto_concedido) VALUES
+('PIZZA10','percentual',10,'',60,500,2,'todos','{}', now() - interval '20 days', now() + interval '25 days', true,'banner_topo','10% OFF em qualquer pizza acima de R$ 60',318,28640.50,2864.05),
+('PRIMEIRACOMPRA','fixo',10,'',45,0,1,'todos','{}', now() - interval '90 days', now() + interval '180 days', true,'popup','R$ 10 OFF na primeira compra',214,16890.00,2140.00),
+('TERCADABORDA','brinde',0,'Borda recheada grátis',55,200,1,'todos','{2,3}', now() - interval '14 days', now() + interval '45 days', true,'banner_topo','Terça e quarta: borda recheada grátis',96,7420.00,1152.00),
+('FRETEGRATIS60','frete',0,'',60,300,3,'delivery','{}', now() - interval '8 days', now() + interval '12 days', true,'carrinho','Entrega grátis acima de R$ 60',187,14260.00,1683.00),
+('RETIRA20','percentual',20,'',40,150,1,'retirada','{1,2}', now() - interval '30 days', now() - interval '2 days', true,'checkout','20% OFF na retirada',150,9310.00,1862.00),
+('VOLTAPRAGENTE','fixo',15,'',70,100,1,'todos','{}', now() + interval '3 days', now() + interval '40 days', true,'popup','R$ 15 OFF para quem não pede há 30 dias',0,0,0),
+('GUARANAGRATIS','brinde',0,'Guaraná 2L grátis',89,120,1,'delivery','{5,6}', now() - interval '40 days', now() + interval '20 days', false,'carrinho','Guaraná 2L grátis no fim de semana',61,6890.00,793.00);
+
+INSERT INTO public.pedidos (numero, cliente, telefone, endereco, canal, pagamento, cupom_codigo, itens, subtotal, desconto, taxa_entrega, total, status, created_at) VALUES
+('#2481','Marina Alves','(11) 98812-4410','Rua Aurora, 88','delivery','pix','PIZZA10','[{"tipo":"pizza","tamanho":"G","qtd":1,"sabores":["Calabresa"],"borda":"Catupiry","preco":62},{"tipo":"bebida","qtd":1,"nome":"Guaraná 2L","preco":14}]'::jsonb,94.19,9.29,8,92.90,'novo', now() - interval '12 minutes'),
+('#2480','Diego Ramos','(11) 99120-8877','Av. Paulista, 1200','delivery','cartao',NULL,'[{"tipo":"pizza","tamanho":"G","qtd":1,"sabores":["Portuguesa","Frango c/ Catupiry"],"borda":"Sem borda","preco":76}]'::jsonb,76,0,8,84.00,'producao', now() - interval '20 minutes'),
+('#2479','Bruna Teixeira','(11) 99777-1245','Retirada no balcão','retirada','pix','TERCADABORDA','[{"tipo":"pizza","tamanho":"M","qtd":1,"sabores":["Margherita"],"borda":"Catupiry","preco":68.5}]'::jsonb,80.50,12,0,68.50,'forno', now() - interval '28 minutes'),
+('#2478','Rodrigo Lima','(11) 98455-9021','Rua das Flores, 45','delivery','dinheiro','PIZZA10','[{"tipo":"pizza","tamanho":"G","qtd":1,"sabores":["Quatro Queijos"],"borda":"Cheddar","preco":72},{"tipo":"pizza","tamanho":"G","qtd":1,"sabores":["Pepperoni"],"borda":"Sem borda","preco":74},{"tipo":"bebida","qtd":1,"nome":"Coca-Cola 2L","preco":16}]'::jsonb,166.79,15.89,8,158.90,'rota', now() - interval '40 minutes'),
+('#2477','Camila Rocha','(11) 99012-3388','Rua Ipê, 301','delivery','pix',NULL,'[{"tipo":"pizza","tamanho":"G","qtd":1,"sabores":["Frango c/ Catupiry"],"borda":"Sem borda","preco":66}]'::jsonb,66,0,8,74.00,'rota', now() - interval '48 minutes'),
+('#2476','Felipe Duarte','(11) 98330-7714','Retirada no balcão','retirada','cartao','PRIMEIRACOMPRA','[{"tipo":"pizza","tamanho":"G","qtd":1,"sabores":["Portuguesa"],"borda":"Catupiry","preco":78},{"tipo":"pizza","tamanho":"P","qtd":1,"sabores":["Chocolate c/ Morango"],"borda":"Chocolate","preco":33.4}]'::jsonb,111.40,10,0,101.40,'entregue', now() - interval '1 hour'),
+('#2475','Aline Souza','(11) 99555-2210','Rua Cedro, 77','delivery','pix',NULL,'[{"tipo":"pizza","tamanho":"G","qtd":1,"sabores":["Calabresa","Margherita"],"borda":"Sem borda","preco":71.9}]'::jsonb,71.90,0,8,79.90,'entregue', now() - interval '1 hour 20 minutes'),
+('#2474','Thiago Nunes','(11) 98700-6633','Rua Jacarandá, 12','delivery','cartao','FRETEGRATIS60','[{"tipo":"pizza","tamanho":"G","qtd":1,"sabores":["Pepperoni"],"borda":"Cheddar","preco":86},{"tipo":"bebida","qtd":2,"nome":"Heineken","preco":16.6}]'::jsonb,119.20,8.50,8,118.70,'entregue', now() - interval '1 hour 45 minutes'),
+('#2473','Larissa Prado','(11) 99331-4407','Retirada no balcão','retirada','pix',NULL,'[{"tipo":"pizza","tamanho":"G","qtd":1,"sabores":["Chocolate c/ Morango"],"borda":"Chocolate","preco":62}]'::jsonb,62,0,0,62.00,'entregue', now() - interval '2 hours'),
+('#2472','Gustavo Pinho','(11) 98122-9988','Rua Bela Vista, 9','delivery','pix',NULL,'[{"tipo":"pizza","tamanho":"G","qtd":1,"sabores":["Calabresa"],"borda":"Catupiry","preco":74},{"tipo":"pizza","tamanho":"M","qtd":1,"sabores":["Quatro Queijos"],"borda":"Sem borda","preco":60.5}]'::jsonb,134.50,20.17,8,134.50,'cancelado', now() - interval '2 hours 30 minutes'),
+('#2471','Marina Alves','(11) 98812-4410','Rua Aurora, 88','delivery','pix','PIZZA10','[{"tipo":"pizza","tamanho":"G","qtd":1,"sabores":["Calabresa","Frango c/ Catupiry"],"borda":"Catupiry","preco":78}]'::jsonb,78,7.80,8,78.20,'entregue', now() - interval '1 day'),
+('#2470','Rodrigo Lima','(11) 98455-9021','Rua das Flores, 45','delivery','cartao',NULL,'[{"tipo":"pizza","tamanho":"G","qtd":2,"sabores":["Margherita"],"borda":"Sem borda","preco":58}]'::jsonb,116,0,8,124.00,'entregue', now() - interval '1 day 2 hours'),
+('#2469','Camila Rocha','(11) 99012-3388','Rua Ipê, 301','retirada','pix','RETIRA20','[{"tipo":"pizza","tamanho":"G","qtd":1,"sabores":["Portuguesa","Quatro Queijos"],"borda":"Cheddar","preco":80}]'::jsonb,80,16,0,64.00,'entregue', now() - interval '2 days'),
+('#2468','Aline Souza','(11) 99555-2210','Rua Cedro, 77','delivery','dinheiro',NULL,'[{"tipo":"pizza","tamanho":"M","qtd":1,"sabores":["Calabresa","Portuguesa"],"borda":"Catupiry","preco":64},{"tipo":"bebida","qtd":1,"nome":"Guaraná 2L","preco":14}]'::jsonb,78,0,8,86.00,'entregue', now() - interval '3 days'),
+('#2467','Thiago Nunes','(11) 98700-6633','Rua Jacarandá, 12','delivery','pix','FRETEGRATIS60','[{"tipo":"pizza","tamanho":"G","qtd":1,"sabores":["Pepperoni","Calabresa"],"borda":"Cheddar","preco":84}]'::jsonb,84,8,8,84.00,'entregue', now() - interval '4 days'),
+('#2466','Bruna Teixeira','(11) 99777-1245','Retirada no balcão','retirada','cartao',NULL,'[{"tipo":"pizza","tamanho":"G","qtd":1,"sabores":["Frango c/ Catupiry","Margherita"],"borda":"Catupiry","preco":76}]'::jsonb,76,0,0,76.00,'entregue', now() - interval '5 days'),
+('#2465','Felipe Duarte','(11) 98330-7714','Rua Verde, 500','delivery','pix','PIZZA10','[{"tipo":"pizza","tamanho":"G","qtd":2,"sabores":["Quatro Queijos"],"borda":"Catupiry","preco":84}]'::jsonb,168,16.80,8,159.20,'entregue', now() - interval '6 days');
+
+
+-- ============================================================
+-- Migration: 20260823120000_multi_tenancy_and_hardening.sql
+-- ============================================================
+
+-- 1. Enums
+DO $$ BEGIN
+    CREATE TYPE public.app_role AS ENUM ('owner', 'manager', 'operator');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+-- 2. Stores table
+CREATE TABLE IF NOT EXISTS public.stores (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    name text NOT NULL,
+    slug text NOT NULL UNIQUE,
+    created_at timestamptz DEFAULT now(),
+    updated_at timestamptz DEFAULT now()
+);
+
+-- 3. User Roles table
+CREATE TABLE IF NOT EXISTS public.user_roles (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    store_id uuid NOT NULL REFERENCES public.stores(id) ON DELETE CASCADE,
+    role public.app_role NOT NULL,
+    UNIQUE (user_id, store_id, role)
+);
+
+-- 4. Idempotency table
+CREATE TABLE IF NOT EXISTS public.idempotency_keys (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    store_id uuid NOT NULL REFERENCES public.stores(id) ON DELETE CASCADE,
+    idempotency_key text NOT NULL,
+    pedido_id uuid, -- Será preenchido após a criação
+    created_at timestamptz DEFAULT now(),
+    UNIQUE (store_id, idempotency_key)
+);
+
+-- 5. Add store_id to existing tables
+ALTER TABLE public.pedidos ADD COLUMN IF NOT EXISTS store_id uuid REFERENCES public.stores(id);
+ALTER TABLE public.cupons ADD COLUMN IF NOT EXISTS store_id uuid REFERENCES public.stores(id);
+ALTER TABLE public.configuracoes_loja ADD COLUMN IF NOT EXISTS store_id uuid REFERENCES public.stores(id);
+ALTER TABLE public.webhook_logs ADD COLUMN IF NOT EXISTS store_id uuid REFERENCES public.stores(id);
+ALTER TABLE public.webhook_logs ADD COLUMN IF NOT EXISTS erro text;
+ALTER TABLE public.webhook_logs ADD COLUMN IF NOT EXISTS pedido_id uuid REFERENCES public.pedidos(id);
+ALTER TABLE public.webhook_logs ALTER COLUMN status TYPE text;
+
+-- 6. Helper function for RLS
+CREATE OR REPLACE FUNCTION public.has_role(_user_id uuid, _role public.app_role, _store_id uuid DEFAULT NULL)
+RETURNS boolean
+LANGUAGE sql
+STABLE SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT EXISTS (
+    SELECT 1
+    FROM public.user_roles
+    WHERE user_id = _user_id
+      AND role = _role
+      AND (_store_id IS NULL OR store_id = _store_id)
+  )
+$$;
+
+-- 7. GRANTS
+GRANT SELECT ON public.stores TO authenticated;
+GRANT SELECT ON public.user_roles TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.pedidos TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.cupons TO authenticated;
+GRANT SELECT, INSERT, UPDATE ON public.configuracoes_loja TO authenticated;
+GRANT SELECT, INSERT, DELETE ON public.webhook_logs TO authenticated;
+GRANT ALL ON public.stores TO service_role;
+GRANT ALL ON public.user_roles TO service_role;
+GRANT ALL ON public.pedidos TO service_role;
+GRANT ALL ON public.cupons TO service_role;
+GRANT ALL ON public.configuracoes_loja TO service_role;
+GRANT ALL ON public.webhook_logs TO service_role;
+GRANT ALL ON public.idempotency_keys TO service_role;
+
+-- 8. Hardened RLS Policies (removing USING(true))
+
+-- Stores
+ALTER TABLE public.stores ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Users can view stores they belong to" ON public.stores;
+CREATE POLICY "Users can view stores they belong to" ON public.stores
+    FOR SELECT TO authenticated
+    USING (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND store_id = stores.id));
+
+-- User Roles
+ALTER TABLE public.user_roles ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Users can view their own roles" ON public.user_roles;
+CREATE POLICY "Users can view their own roles" ON public.user_roles
+    FOR SELECT TO authenticated
+    USING (user_id = auth.uid());
+
+-- Pedidos
+ALTER TABLE public.pedidos ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Painel le pedidos" ON public.pedidos;
+DROP POLICY IF EXISTS "Painel cria pedidos" ON public.pedidos;
+DROP POLICY IF EXISTS "Painel edita pedidos" ON public.pedidos;
+DROP POLICY IF EXISTS "Painel apaga pedidos" ON public.pedidos;
+CREATE POLICY "Manage orders from store" ON public.pedidos
+    FOR ALL TO authenticated
+    USING (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND store_id = pedidos.store_id));
+
+-- Cupons
+ALTER TABLE public.cupons ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Painel le cupons" ON public.cupons;
+DROP POLICY IF EXISTS "Painel cria cupons" ON public.cupons;
+DROP POLICY IF EXISTS "Painel edita cupons" ON public.cupons;
+DROP POLICY IF EXISTS "Painel apaga cupons" ON public.cupons;
+CREATE POLICY "Manage coupons from store" ON public.cupons
+    FOR ALL TO authenticated
+    USING (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND store_id = cupons.store_id));
+-- Keep public anon read for coupons if needed by site
+DROP POLICY IF EXISTS "Cupons ativos sao publicos" ON public.cupons;
+CREATE POLICY "Cupons ativos sao publicos" ON public.cupons FOR SELECT TO anon
+  USING (ativo = true AND now() BETWEEN inicio AND fim);
+
+-- Configuracoes
+ALTER TABLE public.configuracoes_loja ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Painel le config" ON public.configuracoes_loja;
+DROP POLICY IF EXISTS "Painel cria config" ON public.configuracoes_loja;
+DROP POLICY IF EXISTS "Painel edita config" ON public.configuracoes_loja;
+CREATE POLICY "Manage settings from store" ON public.configuracoes_loja
+    FOR ALL TO authenticated
+    USING (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND store_id = configuracoes_loja.store_id));
+
+-- Logs
+ALTER TABLE public.webhook_logs ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Painel le logs" ON public.webhook_logs;
+DROP POLICY IF EXISTS "Painel apaga logs" ON public.webhook_logs;
+CREATE POLICY "Manage logs from store" ON public.webhook_logs
+    FOR ALL TO authenticated
+    USING (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND store_id = webhook_logs.store_id));
+
+-- 9. Transactional Order Creation RPC
+CREATE OR REPLACE FUNCTION public.create_order_v2(
+    p_store_id uuid,
+    p_idempotency_key text,
+    p_numero text,
+    p_cliente text,
+    p_telefone text,
+    p_endereco text,
+    p_canal text,
+    p_pagamento text,
+    p_cupom_codigo text,
+    p_itens jsonb,
+    p_subtotal numeric,
+    p_desconto numeric,
+    p_taxa_entrega numeric,
+    p_total numeric,
+    p_origem text,
+    p_observacao text
+)
+RETURNS json
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    v_pedido_id uuid;
+    v_existing_pedido_id uuid;
+BEGIN
+    -- 1. Check idempotency
+    SELECT pedido_id INTO v_existing_pedido_id
+    FROM public.idempotency_keys
+    WHERE store_id = p_store_id AND idempotency_key = p_idempotency_key;
+
+    IF v_existing_pedido_id IS NOT NULL THEN
+        RETURN json_build_object('ok', true, 'pedido_id', v_existing_pedido_id, 'status', 'idempotent');
+    END IF;
+
+    -- 2. Insert order
+    INSERT INTO public.pedidos (
+        numero, cliente, telefone, endereco, canal, pagamento,
+        cupom_codigo, itens, subtotal, desconto, taxa_entrega, total,
+        status, origem, observacao, store_id
+    ) VALUES (
+        p_numero, p_cliente, p_telefone, p_endereco, p_canal, p_pagamento,
+        p_cupom_codigo, p_itens, p_subtotal, p_desconto, p_taxa_entrega, p_total,
+        'novo', p_origem, p_observacao, p_store_id
+    ) RETURNING id INTO v_pedido_id;
+
+    -- 3. Record idempotency
+    INSERT INTO public.idempotency_keys (store_id, idempotency_key, pedido_id)
+    VALUES (p_store_id, p_idempotency_key, v_pedido_id);
+
+    -- 4. Update coupon if provided
+    IF p_cupom_codigo IS NOT NULL THEN
+        UPDATE public.cupons
+        SET usos = usos + 1,
+            receita_gerada = receita_gerada + p_total,
+            desconto_concedido = desconto_concedido + p_desconto
+        WHERE codigo = p_cupom_codigo AND store_id = p_store_id;
+    END IF;
+
+    RETURN json_build_object('ok', true, 'pedido_id', v_pedido_id, 'status', 'created');
+EXCEPTION WHEN OTHERS THEN
+    RAISE EXCEPTION 'Erro ao criar pedido: %', SQLERRM;
+END;
+$$;
+
+
+-- ============================================================
+-- Migration: 20260823121000_seed_menu.sql
+-- ============================================================
+
+-- Menu table
+CREATE TABLE IF NOT EXISTS public.menu_items (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    nome text NOT NULL,
+    categoria text NOT NULL,
+    preco numeric NOT NULL,
+    custo numeric NOT NULL DEFAULT 0,
+    ativo boolean NOT NULL DEFAULT true,
+    vendas integer NOT NULL DEFAULT 0,
+    store_id uuid REFERENCES public.stores(id),
+    created_at timestamptz DEFAULT now(),
+    updated_at timestamptz DEFAULT now()
+);
+
+-- RLS for menu
+ALTER TABLE public.menu_items ENABLE ROW LEVEL SECURITY;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.menu_items TO authenticated;
+GRANT SELECT ON public.menu_items TO anon;
+GRANT ALL ON public.menu_items TO service_role;
+
+CREATE POLICY "Manage menu items from store" ON public.menu_items
+    FOR ALL TO authenticated
+    USING (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND store_id = menu_items.store_id));
+
+CREATE POLICY "Public menu view" ON public.menu_items
+    FOR SELECT TO anon
+    USING (ativo = true);
+
+-- Default Store and Roles (Mocked data for migration reproducibility)
+-- In a real scenario, this would be empty and populated via dashboard
+-- but here we need it for the initial store.
+
+DO $$
+DECLARE
+    v_store_id uuid;
+BEGIN
+    INSERT INTO public.stores (name, slug)
+    VALUES ('Fornalha Pizzaria', 'fornalha-pizzaria')
+    ON CONFLICT (slug) DO UPDATE SET name = EXCLUDED.name
+    RETURNING id INTO v_store_id;
+
+    -- Update existing data to this store
+    UPDATE public.pedidos SET store_id = v_store_id WHERE store_id IS NULL;
+    UPDATE public.cupons SET store_id = v_store_id WHERE store_id IS NULL;
+    UPDATE public.configuracoes_loja SET store_id = v_store_id WHERE store_id IS NULL;
+
+    -- Seed menu for this store
+    INSERT INTO public.menu_items (nome, categoria, preco, custo, ativo, vendas, store_id)
+    VALUES 
+        ('Calabresa', 'Salgadas', 62, 21.4, true, 412, v_store_id),
+        ('Margherita', 'Salgadas', 58, 18.9, true, 366, v_store_id),
+        ('Frango c/ Catupiry', 'Salgadas', 68, 24.8, true, 341, v_store_id),
+        ('Portuguesa', 'Salgadas', 66, 23.5, true, 289, v_store_id),
+        ('Quatro Queijos', 'Salgadas', 72, 27.9, true, 264, v_store_id),
+        ('Pepperoni', 'Salgadas', 74, 28.6, true, 231, v_store_id),
+        ('Chocolate c/ Morango', 'Doces', 64, 22.1, true, 148, v_store_id),
+        ('Borda recheada Catupiry', 'Bordas', 12, 3.8, true, 502, v_store_id),
+        ('Borda cheddar', 'Bordas', 12, 4.1, true, 318, v_store_id),
+        ('Guaraná 2L', 'Bebidas', 14, 6.2, true, 476, v_store_id),
+        ('Coca-Cola 2L', 'Bebidas', 16, 8.1, true, 401, v_store_id)
+    ON CONFLICT DO NOTHING;
+END $$;
+
+
+-- ============================================================
+-- Migration: 20260823160756_7629ae1c-8019-4a4e-8a89-8fa9d30bb8cd.sql
+-- ============================================================
+
+
+CREATE TABLE IF NOT EXISTS public.menu_items (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    store_id uuid NOT NULL REFERENCES public.stores(id) ON DELETE CASCADE,
+    nome text NOT NULL,
+    preco numeric NOT NULL,
+    ativo boolean DEFAULT true,
+    created_at timestamptz DEFAULT now(),
+    UNIQUE (store_id, nome)
+);
+
+CREATE TABLE IF NOT EXISTS public.api_keys (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    store_id uuid NOT NULL REFERENCES public.stores(id) ON DELETE CASCADE,
+    key_hash text NOT NULL UNIQUE,
+    name text,
+    created_at timestamptz DEFAULT now()
+);
+
+ALTER TABLE public.menu_items ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Manage menu from store" ON public.menu_items;
+CREATE POLICY "Manage menu from store" ON public.menu_items
+    FOR ALL TO authenticated
+    USING (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND store_id = menu_items.store_id));
+
+DROP POLICY IF EXISTS "Menu items are public" ON public.menu_items;
+CREATE POLICY "Menu items are public" ON public.menu_items FOR SELECT TO anon USING (ativo = true);
+
+ALTER TABLE public.api_keys ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Manage keys from store" ON public.api_keys;
+CREATE POLICY "Manage keys from store" ON public.api_keys
+    FOR ALL TO authenticated
+    USING (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND store_id = api_keys.store_id));
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.menu_items TO authenticated;
+GRANT SELECT ON public.menu_items TO anon;
+GRANT ALL ON public.menu_items TO service_role;
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.api_keys TO authenticated;
+GRANT ALL ON public.api_keys TO service_role;
+
+
+-- ============================================================
+-- Migration: 20260823160831_d4b36e31-b78b-407d-a09a-da1eee7cf6c2.sql
+-- ============================================================
+
+
+CREATE OR REPLACE FUNCTION public.create_order_v2(
+    p_store_id uuid,
+    p_idempotency_key text,
+    p_numero text,
+    p_cliente text,
+    p_telefone text,
+    p_endereco text,
+    p_canal text,
+    p_pagamento text,
+    p_cupom_codigo text,
+    p_itens jsonb,
+    p_subtotal numeric,
+    p_desconto numeric,
+    p_taxa_entrega numeric,
+    p_total numeric,
+    p_origem text,
+    p_observacao text
+)
+RETURNS json
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    v_pedido_id uuid;
+    v_existing_pedido_id uuid;
+BEGIN
+    -- 1. Check idempotency
+    SELECT pedido_id INTO v_existing_pedido_id
+    FROM public.idempotency_keys
+    WHERE store_id = p_store_id AND idempotency_key = p_idempotency_key;
+
+    IF v_existing_pedido_id IS NOT NULL THEN
+        RETURN json_build_object('ok', true, 'pedido_id', v_existing_pedido_id, 'status', 'idempotent');
+    END IF;
+
+    -- 2. Insert order
+    INSERT INTO public.pedidos (
+        numero, cliente, telefone, endereco, canal, pagamento,
+        cupom_codigo, itens, subtotal, desconto, taxa_entrega, total,
+        status, origem, observacao, store_id
+    ) VALUES (
+        p_numero, p_cliente, p_telefone, p_endereco, p_canal, p_pagamento,
+        p_cupom_codigo, p_itens, p_subtotal, p_desconto, p_taxa_entrega, p_total,
+        'novo', p_origem, p_observacao, p_store_id
+    ) RETURNING id INTO v_pedido_id;
+
+    -- 3. Record idempotency
+    INSERT INTO public.idempotency_keys (store_id, idempotency_key, pedido_id)
+    VALUES (p_store_id, p_idempotency_key, v_pedido_id);
+
+    -- 4. Update coupon if provided
+    IF p_cupom_codigo IS NOT NULL THEN
+        UPDATE public.cupons
+        SET usos = usos + 1,
+            receita_gerada = receita_gerada + p_total,
+            desconto_concedido = desconto_concedido + p_desconto
+        WHERE codigo = p_cupom_codigo AND store_id = p_store_id;
+    END IF;
+
+    RETURN json_build_object('ok', true, 'pedido_id', v_pedido_id, 'status', 'created');
+EXCEPTION WHEN OTHERS THEN
+    RAISE EXCEPTION 'Erro ao criar pedido: %', SQLERRM;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.create_order_v2 FROM PUBLIC, authenticated, anon;
+GRANT EXECUTE ON FUNCTION public.create_order_v2 TO service_role;
+
+
+-- ============================================================
+-- Migration: 20260823160852_be61c2c2-369b-4ec8-83ef-789fe4d6365e.sql
+-- ============================================================
+
+
+CREATE TABLE IF NOT EXISTS public.idempotency_keys (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    store_id uuid NOT NULL REFERENCES public.stores(id) ON DELETE CASCADE,
+    idempotency_key text NOT NULL,
+    pedido_id uuid REFERENCES public.pedidos(id),
+    created_at timestamptz DEFAULT now(),
+    UNIQUE (store_id, idempotency_key)
+);
+
+ALTER TABLE public.idempotency_keys ENABLE ROW LEVEL SECURITY;
+GRANT ALL ON public.idempotency_keys TO service_role;
+REVOKE ALL ON public.idempotency_keys FROM authenticated, anon;
+
+CREATE POLICY "Service role only for idempotency" ON public.idempotency_keys
+    FOR ALL TO service_role
+    USING (true)
+    WITH CHECK (true);
+
+REVOKE ALL ON FUNCTION public.has_role(uuid, public.app_role, uuid) FROM PUBLIC, authenticated, anon;
+GRANT EXECUTE ON FUNCTION public.has_role(uuid, public.app_role, uuid) TO service_role;
+
+
+-- ============================================================
+-- Migration: 20260823160905_af7f2d83-98c3-4d16-9539-e8b904dabd73.sql
+-- ============================================================
+
+
+ALTER TABLE public.api_keys ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Service role only for api keys" ON public.api_keys;
+CREATE POLICY "Service role only for api keys" ON public.api_keys
+    FOR ALL TO service_role
+    USING (true)
+    WITH CHECK (true);
+
+
+-- ============================================================
+-- Migration: 20260823160919_7abe3022-3bb2-40fe-afd9-5abd85d58b0f.sql
+-- ============================================================
+
+
+-- 1. Ensure RLS is enabled on EVERYTHING
+ALTER TABLE public.stores ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_roles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.pedidos ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.cupons ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.configuracoes_loja ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.webhook_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.menu_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.api_keys ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.idempotency_keys ENABLE ROW LEVEL SECURITY;
+
+-- 2. Clean up Pedidos
+DROP POLICY IF EXISTS "Enable all for authenticated users" ON public.pedidos;
+DROP POLICY IF EXISTS "Users can manage orders from their store" ON public.pedidos;
+DROP POLICY IF EXISTS "Users can view orders from their store" ON public.pedidos;
+DROP POLICY IF EXISTS "Manage orders from store" ON public.pedidos;
+CREATE POLICY "Manage orders from store" ON public.pedidos
+    FOR ALL TO authenticated
+    USING (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND store_id = pedidos.store_id));
+
+-- 3. Clean up Webhook Logs
+DROP POLICY IF EXISTS "Enable all for authenticated users" ON public.webhook_logs;
+DROP POLICY IF EXISTS "Manage logs from store" ON public.webhook_logs;
+CREATE POLICY "Manage logs from store" ON public.webhook_logs
+    FOR ALL TO authenticated
+    USING (EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = auth.uid() AND store_id = webhook_logs.store_id));
+
+-- 4. Clean up Idempotency (Service Role Only)
+DROP POLICY IF EXISTS "Service role only for idempotency" ON public.idempotency_keys;
+CREATE POLICY "Service role only for idempotency" ON public.idempotency_keys
+    FOR ALL TO service_role
+    USING (true)
+    WITH CHECK (true);
+
+-- 5. Clean up API Keys
+DROP POLICY IF EXISTS "Service role only for api keys" ON public.api_keys;
+DROP POLICY IF EXISTS "Manage keys from store" ON public.api_keys;
+CREATE POLICY "Service role only for api keys" ON public.api_keys
+    FOR ALL TO service_role
+    USING (true)
+    WITH CHECK (true);
+
+-- 6. User Roles protection
+DROP POLICY IF EXISTS "Users can view their own roles" ON public.user_roles;
+CREATE POLICY "Users can view their own roles" ON public.user_roles
+    FOR SELECT TO authenticated
+    USING (user_id = auth.uid());
+
+
+-- ============================================================
+-- Migration: 20260823170000_role_based_rls.sql
+-- ============================================================
+
+-- Drop existing policies that are too broad
+DROP POLICY IF EXISTS "Manage orders from store" ON public.pedidos;
+DROP POLICY IF EXISTS "Manage coupons from store" ON public.cupons;
+DROP POLICY IF EXISTS "Manage settings from store" ON public.configuracoes_loja;
+DROP POLICY IF EXISTS "Manage logs from store" ON public.webhook_logs;
+DROP POLICY IF EXISTS "Users can view stores they belong to" ON public.stores;
+
+-- 1. STORES
+CREATE POLICY "View stores" ON public.stores
+    FOR SELECT TO authenticated
+    USING (public.has_role(auth.uid(), 'owner', id) OR 
+           public.has_role(auth.uid(), 'manager', id) OR 
+           public.has_role(auth.uid(), 'operator', id));
+
+-- 2. PEDIDOS (Orders)
+-- Owners and Managers can do everything
+CREATE POLICY "Full access to orders (owner/manager)" ON public.pedidos
+    FOR ALL TO authenticated
+    USING (public.has_role(auth.uid(), 'owner', store_id) OR 
+           public.has_role(auth.uid(), 'manager', store_id));
+
+-- Operators can view and update status only
+CREATE POLICY "Operator view orders" ON public.pedidos
+    FOR SELECT TO authenticated
+    USING (public.has_role(auth.uid(), 'operator', store_id));
+
+CREATE POLICY "Operator update order status" ON public.pedidos
+    FOR UPDATE TO authenticated
+    USING (public.has_role(auth.uid(), 'operator', store_id))
+    WITH CHECK (public.has_role(auth.uid(), 'operator', store_id));
+
+-- 3. CUPONS (Coupons)
+CREATE POLICY "Manage coupons (owner/manager)" ON public.cupons
+    FOR ALL TO authenticated
+    USING (public.has_role(auth.uid(), 'owner', store_id) OR 
+           public.has_role(auth.uid(), 'manager', store_id));
+
+CREATE POLICY "View coupons (operator)" ON public.cupons
+    FOR SELECT TO authenticated
+    USING (public.has_role(auth.uid(), 'operator', store_id));
+
+-- 4. CONFIGURACOES_LOJA (Settings)
+CREATE POLICY "Manage settings (owner/manager)" ON public.configuracoes_loja
+    FOR ALL TO authenticated
+    USING (public.has_role(auth.uid(), 'owner', store_id) OR 
+           public.has_role(auth.uid(), 'manager', store_id));
+
+CREATE POLICY "View settings (operator)" ON public.configuracoes_loja
+    FOR SELECT TO authenticated
+    USING (public.has_role(auth.uid(), 'operator', store_id));
+
+-- 5. WEBHOOK_LOGS
+CREATE POLICY "Manage logs (owner/manager)" ON public.webhook_logs
+    FOR ALL TO authenticated
+    USING (public.has_role(auth.uid(), 'owner', store_id) OR 
+           public.has_role(auth.uid(), 'manager', store_id));
+
+CREATE POLICY "View logs (operator)" ON public.webhook_logs
+    FOR SELECT TO authenticated
+    USING (public.has_role(auth.uid(), 'operator', store_id));
+
+-- 6. API_KEYS (Strictly owner only if ever exposed to frontend, but usually service_role only)
+ALTER TABLE public.api_keys ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Manage api keys" ON public.api_keys;
+CREATE POLICY "Manage api keys (owner only)" ON public.api_keys
+    FOR ALL TO authenticated
+    USING (public.has_role(auth.uid(), 'owner', store_id));
+
+-- 7. MENU_ITEMS
+CREATE POLICY "Manage menu (owner/manager)" ON public.menu_items
+    FOR ALL TO authenticated
+    USING (public.has_role(auth.uid(), 'owner', store_id) OR 
+           public.has_role(auth.uid(), 'manager', store_id));
+
+CREATE POLICY "View menu (operator)" ON public.menu_items
+    FOR SELECT TO authenticated
+    USING (public.has_role(auth.uid(), 'operator', store_id));
+
+
+-- ============================================================
+-- Migration: 20260823171000_fix_menu_items_constraint.sql
+-- ============================================================
+
+-- Fix menu_items table schema and constraints
+-- Incremental migration using ALTER TABLE
+
+-- 1. Restore missing columns if they were lost or never created correctly
+ALTER TABLE public.menu_items ADD COLUMN IF NOT EXISTS categoria text NOT NULL DEFAULT 'Geral';
+ALTER TABLE public.menu_items ADD COLUMN IF NOT EXISTS custo numeric NOT NULL DEFAULT 0;
+ALTER TABLE public.menu_items ADD COLUMN IF NOT EXISTS vendas integer NOT NULL DEFAULT 0;
+ALTER TABLE public.menu_items ADD COLUMN IF NOT EXISTS updated_at timestamptz DEFAULT now();
+
+-- 2. Ensure store_id is NOT NULL
+DO $$ 
+DECLARE
+    v_default_store_id uuid;
+BEGIN
+    SELECT id INTO v_default_store_id FROM public.stores LIMIT 1;
+    UPDATE public.menu_items SET store_id = v_default_store_id WHERE store_id IS NULL;
+END $$;
+
+ALTER TABLE public.menu_items ALTER COLUMN store_id SET NOT NULL;
+
+-- 3. Cleanup duplicates and add UNIQUE constraint
+DELETE FROM public.menu_items a
+USING public.menu_items b
+WHERE a.id < b.id 
+  AND a.store_id = b.store_id 
+  AND a.nome = b.nome;
+
+ALTER TABLE public.menu_items DROP CONSTRAINT IF EXISTS menu_items_store_id_nome_key;
+ALTER TABLE public.menu_items ADD CONSTRAINT menu_items_store_id_nome_key UNIQUE (store_id, nome);
+
+-- 4. Final schema adjustments
+ALTER TABLE public.menu_items ALTER COLUMN preco SET NOT NULL;
+ALTER TABLE public.menu_items ALTER COLUMN ativo SET DEFAULT true;
+ALTER TABLE public.menu_items ALTER COLUMN ativo SET NOT NULL;
+
+
+-- ============================================================
+-- Migration: 20260823172000_atomic_idempotency.sql
+-- ============================================================
+
+-- Reimplement idempotency with atomic key reservation to handle concurrent requests
+-- Using ON CONFLICT to prevent race conditions
+
+CREATE OR REPLACE FUNCTION public.create_order_v2(
+    p_store_id uuid,
+    p_idempotency_key text,
+    p_numero text,
+    p_cliente text,
+    p_telefone text,
+    p_endereco text,
+    p_canal text,
+    p_pagamento text,
+    p_cupom_codigo text,
+    p_itens jsonb,
+    p_subtotal numeric,
+    p_desconto numeric,
+    p_taxa_entrega numeric,
+    p_total numeric,
+    p_origem text,
+    p_observacao text
+)
+RETURNS json
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    v_pedido_id uuid;
+    v_existing_pedido_id uuid;
+BEGIN
+    -- 1. Atomic reservation of the idempotency key
+    -- This handles the race condition where two requests come at the same time
+    INSERT INTO public.idempotency_keys (store_id, idempotency_key)
+    VALUES (p_store_id, p_idempotency_key)
+    ON CONFLICT (store_id, idempotency_key) DO NOTHING;
+
+    -- 2. Check if it was already processed (has a pedido_id) or just reserved
+    -- We use FOR UPDATE to lock the row if it exists
+    SELECT pedido_id INTO v_existing_pedido_id
+    FROM public.idempotency_keys
+    WHERE store_id = p_store_id AND idempotency_key = p_idempotency_key
+    FOR UPDATE;
+
+    -- If there's already a pedido_id, return it (idempotent success)
+    IF v_existing_pedido_id IS NOT NULL THEN
+        RETURN json_build_object('ok', true, 'pedido_id', v_existing_pedido_id, 'status', 'idempotent');
+    END IF;
+
+    -- 3. Insert order
+    INSERT INTO public.pedidos (
+        numero, cliente, telefone, endereco, canal, pagamento,
+        cupom_codigo, itens, subtotal, desconto, taxa_entrega, total,
+        status, origem, observacao, store_id
+    ) VALUES (
+        p_numero, p_cliente, p_telefone, p_endereco, p_canal, p_pagamento,
+        p_cupom_codigo, p_itens, p_subtotal, p_desconto, p_taxa_entrega, p_total,
+        'novo', p_origem, p_observacao, p_store_id
+    ) RETURNING id INTO v_pedido_id;
+
+    -- 4. Update the reserved idempotency key with the new pedido_id
+    UPDATE public.idempotency_keys
+    SET pedido_id = v_pedido_id
+    WHERE store_id = p_store_id AND idempotency_key = p_idempotency_key;
+
+    -- 5. Update coupon if provided
+    IF p_cupom_codigo IS NOT NULL THEN
+        UPDATE public.cupons
+        SET usos = usos + 1,
+            receita_gerada = receita_gerada + p_total,
+            desconto_concedido = desconto_concedido + p_desconto
+        WHERE codigo = p_cupom_codigo AND store_id = p_store_id;
+    END IF;
+
+    RETURN json_build_object('ok', true, 'pedido_id', v_pedido_id, 'status', 'created');
+
+EXCEPTION WHEN OTHERS THEN
+    -- Rollback is automatic in PL/pgSQL for the current transaction
+    RAISE EXCEPTION 'Erro ao criar pedido: %', SQLERRM;
+END;
+$$;
+
+
+-- ============================================================
+-- Migration: 20260823173000_order_rpc_with_logging.sql
+-- ============================================================
+
+-- Update create_order_v2 to include logging within the same transaction
+
+CREATE OR REPLACE FUNCTION public.create_order_v2(
+    p_store_id uuid,
+    p_idempotency_key text,
+    p_numero text,
+    p_cliente text,
+    p_telefone text,
+    p_endereco text,
+    p_canal text,
+    p_pagamento text,
+    p_cupom_codigo text,
+    p_itens jsonb,
+    p_subtotal numeric,
+    p_desconto numeric,
+    p_taxa_entrega numeric,
+    p_total numeric,
+    p_origem text,
+    p_observacao text,
+    p_webhook_payload jsonb DEFAULT NULL
+)
+RETURNS json
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    v_pedido_id uuid;
+    v_existing_pedido_id uuid;
+BEGIN
+    -- 1. Atomic reservation of the idempotency key
+    INSERT INTO public.idempotency_keys (store_id, idempotency_key)
+    VALUES (p_store_id, p_idempotency_key)
+    ON CONFLICT (store_id, idempotency_key) DO NOTHING;
+
+    -- 2. Check if it was already processed
+    SELECT pedido_id INTO v_existing_pedido_id
+    FROM public.idempotency_keys
+    WHERE store_id = p_store_id AND idempotency_key = p_idempotency_key
+    FOR UPDATE;
+
+    IF v_existing_pedido_id IS NOT NULL THEN
+        RETURN json_build_object('ok', true, 'pedido_id', v_existing_pedido_id, 'status', 'idempotent');
+    END IF;
+
+    -- 3. Insert order
+    INSERT INTO public.pedidos (
+        numero, cliente, telefone, endereco, canal, pagamento,
+        cupom_codigo, itens, subtotal, desconto, taxa_entrega, total,
+        status, origem, observacao, store_id
+    ) VALUES (
+        p_numero, p_cliente, p_telefone, p_endereco, p_canal, p_pagamento,
+        p_cupom_codigo, p_itens, p_subtotal, p_desconto, p_taxa_entrega, p_total,
+        'novo', p_origem, p_observacao, p_store_id
+    ) RETURNING id INTO v_pedido_id;
+
+    -- 4. Update the reserved idempotency key
+    UPDATE public.idempotency_keys
+    SET pedido_id = v_pedido_id
+    WHERE store_id = p_store_id AND idempotency_key = p_idempotency_key;
+
+    -- 5. Update coupon if provided
+    IF p_cupom_codigo IS NOT NULL THEN
+        UPDATE public.cupons
+        SET usos = usos + 1,
+            receita_gerada = receita_gerada + p_total,
+            desconto_concedido = desconto_concedido + p_desconto
+        WHERE codigo = p_cupom_codigo AND store_id = p_store_id;
+    END IF;
+
+    -- 6. Log the webhook success (within the same transaction)
+    IF p_webhook_payload IS NOT NULL THEN
+        INSERT INTO public.webhook_logs (
+            store_id,
+            pedido_id,
+            status,
+            payload
+        ) VALUES (
+            p_store_id,
+            v_pedido_id,
+            'sucesso',
+            p_webhook_payload
+        );
+    END IF;
+
+    RETURN json_build_object('ok', true, 'pedido_id', v_pedido_id, 'status', 'created');
+
+EXCEPTION WHEN OTHERS THEN
+    -- Log the failure if possible (might require a nested transaction or separate handling, 
+    -- but usually we want the order rollback to be complete)
+    RAISE EXCEPTION 'Erro ao criar pedido: %', SQLERRM;
+END;
+$$;
+
+
+-- ============================================================
+-- Migration: 20260823174000_secure_order_rpc_recalc.sql
+-- ============================================================
+
+-- Reimplement create_order_v2 to handle pricing calculation and coupon validation internally
+-- This ensures the client cannot manipulate financial values.
+
+CREATE OR REPLACE FUNCTION public.create_order_v2(
+    p_store_id uuid,
+    p_idempotency_key text,
+    p_numero text,
+    p_cliente text,
+    p_telefone text,
+    p_endereco text,
+    p_canal text,
+    p_pagamento text,
+    p_cupom_codigo text,
+    p_itens jsonb,
+    p_origem text,
+    p_observacao text,
+    p_webhook_payload jsonb DEFAULT NULL
+)
+RETURNS json
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    v_pedido_id uuid;
+    v_existing_pedido_id uuid;
+    v_subtotal numeric := 0;
+    v_desconto numeric := 0;
+    v_taxa_entrega numeric := 0;
+    v_total numeric := 0;
+    v_item record;
+    v_menu_item record;
+    v_cupom record;
+    v_config record;
+    v_item_json jsonb;
+BEGIN
+    -- 1. Atomic reservation of the idempotency key
+    INSERT INTO public.idempotency_keys (store_id, idempotency_key)
+    VALUES (p_store_id, p_idempotency_key)
+    ON CONFLICT (store_id, idempotency_key) DO NOTHING;
+
+    -- 2. Check if it was already processed
+    SELECT pedido_id INTO v_existing_pedido_id
+    FROM public.idempotency_keys
+    WHERE store_id = p_store_id AND idempotency_key = p_idempotency_key
+    FOR UPDATE;
+
+    IF v_existing_pedido_id IS NOT NULL THEN
+        RETURN json_build_object('ok', true, 'pedido_id', v_existing_pedido_id, 'status', 'idempotent');
+    END IF;
+
+    -- 3. Recalculate Subtotal and Validate Items
+    FOR v_item_json IN SELECT * FROM jsonb_array_elements(p_itens)
+    LOOP
+        SELECT * INTO v_menu_item 
+        FROM public.menu_items 
+        WHERE store_id = p_store_id AND nome = (v_item_json->>'nome') AND ativo = true;
+
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'Item indisponível ou inexistente: %', (v_item_json->>'nome');
+        END IF;
+
+        v_subtotal := v_subtotal + (v_menu_item.preco * (v_item_json->>'qtd')::numeric);
+    END LOOP;
+
+    -- 4. Calculate Delivery Fee
+    IF p_canal = 'delivery' THEN
+        SELECT taxa_entrega INTO v_taxa_entrega 
+        FROM public.configuracoes_loja 
+        WHERE store_id = p_store_id;
+        
+        v_taxa_entrega := COALESCE(v_taxa_entrega, 0);
+    END IF;
+
+    -- 5. Validate and Calculate Coupon
+    IF p_cupom_codigo IS NOT NULL AND p_cupom_codigo <> '' THEN
+        SELECT * INTO v_cupom 
+        FROM public.cupons 
+        WHERE store_id = p_store_id AND codigo = p_cupom_codigo AND ativo = true;
+
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'Cupom inválido ou inativo';
+        END IF;
+
+        -- Check validity period
+        IF now() < COALESCE(v_cupom.inicio, now() - interval '1 second') OR 
+           now() > COALESCE(v_cupom.fim, now() + interval '1 second') THEN
+            RAISE EXCEPTION 'Cupom fora da validade';
+        END IF;
+
+        -- Check total usage limit
+        IF v_cupom.limite_total IS NOT NULL AND v_cupom.usos >= v_cupom.limite_total THEN
+            RAISE EXCEPTION 'Cupom esgotado';
+        END IF;
+
+        -- Check minimum order value
+        IF v_subtotal < COALESCE(v_cupom.minimo, 0) THEN
+            RAISE EXCEPTION 'Pedido mínimo para este cupom: R$ %', v_cupom.minimo;
+        END IF;
+
+        -- Calculate discount
+        IF v_cupom.tipo = 'percentual' THEN
+            v_desconto := (v_subtotal * v_cupom.valor) / 100;
+        ELSEIF v_cupom.tipo = 'fixo' THEN
+            v_desconto := v_cupom.valor;
+        END IF;
+    END IF;
+
+    -- 6. Final Total
+    v_total := v_subtotal + v_taxa_entrega - v_desconto;
+    IF v_total < 0 THEN v_total := 0; END IF;
+
+    -- 7. Insert order
+    INSERT INTO public.pedidos (
+        numero, cliente, telefone, endereco, canal, pagamento,
+        cupom_codigo, itens, subtotal, desconto, taxa_entrega, total,
+        status, origem, observacao, store_id
+    ) VALUES (
+        p_numero, p_cliente, p_telefone, p_endereco, p_canal, p_pagamento,
+        p_cupom_codigo, p_itens, v_subtotal, v_desconto, v_taxa_entrega, v_total,
+        'novo', p_origem, p_observacao, p_store_id
+    ) RETURNING id INTO v_pedido_id;
+
+    -- 8. Update the reserved idempotency key
+    UPDATE public.idempotency_keys
+    SET pedido_id = v_pedido_id
+    WHERE store_id = p_store_id AND idempotency_key = p_idempotency_key;
+
+    -- 9. Atomic usage increment
+    IF p_cupom_codigo IS NOT NULL AND p_cupom_codigo <> '' THEN
+        UPDATE public.cupons
+        SET usos = usos + 1,
+            receita_gerada = receita_gerada + v_total,
+            desconto_concedido = desconto_concedido + v_desconto
+        WHERE id = v_cupom.id;
+    END IF;
+
+    -- 10. Webhook logging
+    IF p_webhook_payload IS NOT NULL THEN
+        INSERT INTO public.webhook_logs (
+            store_id, pedido_id, status, payload, evento
+        ) VALUES (
+            p_store_id, v_pedido_id, 'ok', p_webhook_payload, 'pedido.recebido'
+        );
+    END IF;
+
+    RETURN json_build_object(
+        'ok', true, 
+        'pedido_id', v_pedido_id, 
+        'status', 'created',
+        'subtotal', v_subtotal,
+        'desconto', v_desconto,
+        'taxa_entrega', v_taxa_entrega,
+        'total', v_total
+    );
+
+EXCEPTION WHEN OTHERS THEN
+    RAISE EXCEPTION 'Erro ao criar pedido: %', SQLERRM;
+END;
+$$;
+
+
+-- ============================================================
+-- Migration: 20260823180000_advanced_coupons_and_rate_limit.sql
+-- ============================================================
+
+-- 1. Extend cupons table
+ALTER TABLE public.cupons 
+ADD COLUMN IF NOT EXISTS canal text CHECK (canal IN ('delivery', 'retirada', 'balcao', 'todos')) DEFAULT 'todos',
+ADD COLUMN IF NOT EXISTS dias_semana integer[] DEFAULT '{0,1,2,3,4,5,6}', -- 0=Sunday
+ADD COLUMN IF NOT EXISTS limite_por_cliente integer DEFAULT NULL,
+ADD COLUMN IF NOT EXISTS cumulativo boolean DEFAULT false,
+ADD COLUMN IF NOT EXISTS frete_gratis boolean DEFAULT false,
+ADD COLUMN IF NOT EXISTS brinde_item_id uuid REFERENCES public.menu_items(id),
+ADD COLUMN IF NOT EXISTS total_minimo_zero boolean DEFAULT false;
+
+-- 2. Rate limiting table (Leaky Bucket / Token Bucket helper)
+CREATE TABLE IF NOT EXISTS public.rate_limits (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    key text UNIQUE NOT NULL, -- integration_id:ip
+    tokens numeric NOT NULL DEFAULT 10,
+    last_refill timestamptz NOT NULL DEFAULT now(),
+    store_id uuid REFERENCES public.stores(id) NOT NULL
+);
+
+GRANT SELECT, INSERT, UPDATE ON public.rate_limits TO service_role;
+ALTER TABLE public.rate_limits ENABLE ROW LEVEL SECURITY;
+
+-- 3. Update create_order_v2 to support advanced coupon logic and product_id
+CREATE OR REPLACE FUNCTION public.create_order_v2(
+    p_store_id uuid,
+    p_idempotency_key text,
+    p_numero text,
+    p_cliente text,
+    p_telefone text,
+    p_endereco text,
+    p_canal text,
+    p_pagamento text,
+    p_cupom_codigo text,
+    p_itens jsonb, -- Now expected to have product_id
+    p_origem text,
+    p_observacao text,
+    p_webhook_payload jsonb DEFAULT NULL
+)
+RETURNS json
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    v_pedido_id uuid;
+    v_existing_pedido_id uuid;
+    v_subtotal numeric := 0;
+    v_desconto numeric := 0;
+    v_taxa_entrega numeric := 0;
+    v_total numeric := 0;
+    v_menu_item record;
+    v_cupom record;
+    v_item_json jsonb;
+    v_hoje_dow integer := extract(dow from now());
+BEGIN
+    -- Idempotency check
+    INSERT INTO public.idempotency_keys (store_id, idempotency_key)
+    VALUES (p_store_id, p_idempotency_key)
+    ON CONFLICT (store_id, idempotency_key) DO NOTHING;
+
+    SELECT pedido_id INTO v_existing_pedido_id
+    FROM public.idempotency_keys
+    WHERE store_id = p_store_id AND idempotency_key = p_idempotency_key
+    FOR UPDATE;
+
+    IF v_existing_pedido_id IS NOT NULL THEN
+        RETURN json_build_object('ok', true, 'pedido_id', v_existing_pedido_id, 'status', 'idempotent');
+    END IF;
+
+    -- Calculate subtotal using product_id (preferred) or nome (fallback)
+    FOR v_item_json IN SELECT * FROM jsonb_array_elements(p_itens)
+    LOOP
+        IF v_item_json ? 'product_id' THEN
+            SELECT * INTO v_menu_item FROM public.menu_items WHERE id = (v_item_json->>'product_id')::uuid AND store_id = p_store_id AND ativo = true;
+        ELSE
+            SELECT * INTO v_menu_item FROM public.menu_items WHERE nome = (v_item_json->>'nome') AND store_id = p_store_id AND ativo = true;
+        END IF;
+
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'Item indisponível: %', COALESCE(v_item_json->>'nome', v_item_json->>'product_id');
+        END IF;
+
+        v_subtotal := v_subtotal + (v_menu_item.preco * (v_item_json->>'qtd')::numeric);
+    END LOOP;
+
+    -- Delivery fee
+    IF p_canal = 'delivery' THEN
+        SELECT taxa_entrega INTO v_taxa_entrega FROM public.configuracoes_loja WHERE store_id = p_store_id;
+    END IF;
+    v_taxa_entrega := COALESCE(v_taxa_entrega, 0);
+
+    -- Advanced Coupon Validation
+    IF p_cupom_codigo IS NOT NULL AND p_cupom_codigo <> '' THEN
+        SELECT * INTO v_cupom FROM public.cupons WHERE store_id = p_store_id AND codigo = p_cupom_codigo AND ativo = true;
+
+        IF NOT FOUND THEN RAISE EXCEPTION 'Cupom inválido'; END IF;
+        
+        -- Basic checks (date, usage, min value)
+        IF now() < COALESCE(v_cupom.inicio, now()) OR now() > COALESCE(v_cupom.fim, now()) THEN RAISE EXCEPTION 'Cupom expirado'; END IF;
+        IF v_cupom.limite_total IS NOT NULL AND v_cupom.usos >= v_cupom.limite_total THEN RAISE EXCEPTION 'Cupom esgotado'; END IF;
+        IF v_subtotal < COALESCE(v_cupom.minimo, 0) AND NOT COALESCE(v_cupom.total_minimo_zero, false) THEN RAISE EXCEPTION 'Pedido mínimo não atingido'; END IF;
+
+        -- Channel check
+        IF v_cupom.canal <> 'todos' AND v_cupom.canal <> p_canal THEN RAISE EXCEPTION 'Cupom não válido para este canal'; END IF;
+
+        -- Day of week check
+        IF NOT (v_hoje_dow = ANY(v_cupom.dias_semana)) THEN RAISE EXCEPTION 'Cupom não válido hoje'; END IF;
+
+        -- Calculate Discount
+        IF v_cupom.tipo = 'percentual' THEN
+            v_desconto := (v_subtotal * v_cupom.valor) / 100;
+        ELSE
+            v_desconto := v_cupom.valor;
+        END IF;
+        
+        IF v_cupom.frete_gratis THEN v_taxa_entrega := 0; END IF;
+    END IF;
+
+    v_total := v_subtotal + v_taxa_entrega - v_desconto;
+    IF v_total < 0 THEN v_total := 0; END IF;
+
+    -- Create order
+    INSERT INTO public.pedidos (
+        numero, cliente, telefone, endereco, canal, pagamento,
+        cupom_codigo, itens, subtotal, desconto, taxa_entrega, total,
+        status, origem, observacao, store_id
+    ) VALUES (
+        p_numero, p_cliente, p_telefone, p_endereco, p_canal, p_pagamento,
+        p_cupom_codigo, p_itens, v_subtotal, v_desconto, v_taxa_entrega, v_total,
+        'novo', p_origem, p_observacao, p_store_id
+    ) RETURNING id INTO v_pedido_id;
+
+    UPDATE public.idempotency_keys SET pedido_id = v_pedido_id WHERE store_id = p_store_id AND idempotency_key = p_idempotency_key;
+    
+    IF v_cupom.id IS NOT NULL THEN
+        UPDATE public.cupons SET usos = usos + 1 WHERE id = v_cupom.id;
+    END IF;
+
+    IF p_webhook_payload IS NOT NULL THEN
+        INSERT INTO public.webhook_logs (store_id, pedido_id, status, payload, evento)
+        VALUES (p_store_id, v_pedido_id, 'ok', p_webhook_payload, 'pedido.recebido');
+    END IF;
+
+    RETURN json_build_object('ok', true, 'pedido_id', v_pedido_id);
+END;
+$$;
+
+
+-- ============================================================
+-- Migration: 20260823190000_estoque.sql
+-- ============================================================
+
+-- =============================================
+-- Sistema de Estoque de Insumos
+-- =============================================
+
+-- Tabela de insumos/produtos em estoque
+CREATE TABLE IF NOT EXISTS estoque (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  nome text NOT NULL,
+  categoria text NOT NULL DEFAULT 'Outros',
+  unidade text NOT NULL DEFAULT 'kg',
+  quantidade_atual numeric NOT NULL DEFAULT 0,
+  quantidade_minima numeric NOT NULL DEFAULT 0,
+  custo_unitario numeric NOT NULL DEFAULT 0,
+  store_id uuid REFERENCES stores(id) ON DELETE CASCADE,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
+);
+
+-- Tabela de receitas (relação pizza ↔ insumos)
+CREATE TABLE IF NOT EXISTS receita_itens (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  menu_item_id uuid REFERENCES menu_items(id) ON DELETE CASCADE,
+  estoque_id uuid REFERENCES estoque(id) ON DELETE CASCADE,
+  quantidade_necessaria numeric NOT NULL DEFAULT 0,
+  store_id uuid REFERENCES stores(id) ON DELETE CASCADE,
+  created_at timestamptz DEFAULT now()
+);
+
+-- RLS
+ALTER TABLE estoque ENABLE ROW LEVEL SECURITY;
+ALTER TABLE receita_itens ENABLE ROW LEVEL SECURITY;
+
+-- Policies estoque
+CREATE POLICY "owner_manager_full_estoque" ON estoque
+  FOR ALL USING (has_role('owner'::app_role, store_id) OR has_role('manager'::app_role, store_id));
+
+CREATE POLICY "operator_read_estoque" ON estoque
+  FOR SELECT USING (has_role('operator'::app_role, store_id));
+
+-- Policies receita_itens
+CREATE POLICY "owner_manager_full_receita" ON receita_itens
+  FOR ALL USING (has_role('owner'::app_role, store_id) OR has_role('manager'::app_role, store_id));
+
+CREATE POLICY "operator_read_receita" ON receita_itens
+  FOR SELECT USING (has_role('operator'::app_role, store_id));
+
+-- Trigger updated_at para estoque
+CREATE TRIGGER set_estoque_updated_at
+  BEFORE UPDATE ON estoque
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- Índices
+CREATE INDEX IF NOT EXISTS idx_estoque_store ON estoque(store_id);
+CREATE INDEX IF NOT EXISTS idx_estoque_categoria ON estoque(categoria);
+CREATE INDEX IF NOT EXISTS idx_receita_menu_item ON receita_itens(menu_item_id);
+CREATE INDEX IF NOT EXISTS idx_receita_estoque ON receita_itens(estoque_id);
+
+-- Realtime
+ALTER TABLE estoque REPLICA IDENTITY FULL;
+ALTER TABLE receita_itens REPLICA IDENTITY FULL;
+
+-- =============================================
+-- Seed: insumos padrão para pizzaria
+-- =============================================
+DO $$
+DECLARE
+  v_store_id uuid;
+BEGIN
+  SELECT id INTO v_store_id FROM stores LIMIT 1;
+  IF v_store_id IS NULL THEN RETURN; END IF;
+
+  -- Laticínios
+  INSERT INTO estoque (nome, categoria, unidade, quantidade_atual, quantidade_minima, custo_unitario, store_id)
+  VALUES
+    ('Mussarela', 'Laticínios', 'kg', 15, 5, 32, v_store_id),
+    ('Catupiry', 'Laticínios', 'kg', 8, 3, 28, v_store_id),
+    ('Cheddar', 'Laticínios', 'kg', 5, 2, 30, v_store_id),
+    ('Parmesão', 'Laticínios', 'kg', 3, 1, 45, v_store_id)
+  ON CONFLICT DO NOTHING;
+
+  -- Carnes
+  INSERT INTO estoque (nome, categoria, unidade, quantidade_atual, quantidade_minima, custo_unitario, store_id)
+  VALUES
+    ('Calabresa', 'Carnes', 'kg', 10, 3, 25, v_store_id),
+    ('Pepperoni', 'Carnes', 'kg', 5, 2, 38, v_store_id),
+    ('Frango', 'Carnes', 'kg', 8, 3, 18, v_store_id),
+    ('Presunto', 'Carnes', 'kg', 4, 2, 22, v_store_id)
+  ON CONFLICT DO NOTHING;
+
+  -- Legumes e Verduras
+  INSERT INTO estoque (nome, categoria, unidade, quantidade_atual, quantidade_minima, custo_unitario, store_id)
+  VALUES
+    ('Tomate', 'Legumes', 'kg', 6, 2, 8, v_store_id),
+    ('Cebola', 'Legumes', 'kg', 4, 2, 6, v_store_id),
+    ('Azeitona', 'Legumes', 'kg', 3, 1, 20, v_store_id),
+    ('Orégano', 'Legumes', 'kg', 1, 0.5, 15, v_store_id)
+  ON CONFLICT DO NOTHING;
+
+  -- Massas e Bases
+  INSERT INTO estoque (nome, categoria, unidade, quantidade_atual, quantidade_minima, custo_unitario, store_id)
+  VALUES
+    ('Massa de pizza', 'Massas', 'un', 50, 20, 3.5, v_store_id),
+    ('Chocolate', 'Massas', 'kg', 5, 2, 18, v_store_id),
+    ('Morango', 'Massas', 'kg', 3, 1, 12, v_store_id)
+  ON CONFLICT DO NOTHING;
+
+  -- Bebidas
+  INSERT INTO estoque (nome, categoria, unidade, quantidade_atual, quantidade_minima, custo_unitario, store_id)
+  VALUES
+    ('Guaraná 2L', 'Bebidas', 'un', 24, 10, 4.5, v_store_id),
+    ('Coca-Cola 2L', 'Bebidas', 'un', 18, 8, 6.2, v_store_id),
+    ('Água mineral', 'Bebidas', 'un', 30, 15, 1.8, v_store_id)
+  ON CONFLICT DO NOTHING;
+END $$;
+
+
+-- ============================================================
+-- Migration: 20260823200000_clientes_e_atendente.sql
+-- ============================================================
+
+-- =============================================
+-- Tabela de Clientes para CRM e Integração
+-- =============================================
+
+CREATE TABLE IF NOT EXISTS clientes (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  nome text NOT NULL,
+  telefone text,
+  email text,
+  endereco text,
+  cpf text,
+  data_nascimento date,
+  observacoes text,
+  origem text DEFAULT 'sistema',
+  tier text DEFAULT 'Novo',
+  total_pedidos integer DEFAULT 0,
+  total_gasto numeric DEFAULT 0,
+  ultimo_pedido timestamptz,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now(),
+  store_id uuid REFERENCES stores(id) ON DELETE CASCADE
+);
+
+-- RLS
+ALTER TABLE clientes ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "owner_manager_full_clientes" ON clientes
+  FOR ALL USING (has_role('owner'::app_role, store_id) OR has_role('manager'::app_role, store_id));
+
+CREATE POLICY "operator_read_clientes" ON clientes
+  FOR SELECT USING (has_role('operator'::app_role, store_id));
+
+-- Trigger updated_at
+CREATE TRIGGER set_clientes_updated_at
+  BEFORE UPDATE ON clientes
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- Índices
+CREATE INDEX IF NOT EXISTS idx_clientes_store ON clientes(store_id);
+CREATE INDEX IF NOT EXISTS idx_clientes_telefone ON clientes(telefone);
+CREATE INDEX IF NOT EXISTS idx_clientes_tier ON clientes(tier);
+
+-- Realtime
+ALTER TABLE clientes REPLICA IDENTITY FULL;
+
+-- =============================================
+-- Tabela de Sessões do Atendente
+-- =============================================
+CREATE TABLE IF NOT EXISTS atendente_sessoes (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  atendente_nome text NOT NULL,
+  atendente_id text NOT NULL,
+  status text DEFAULT 'online',
+  pedidos_atendidos integer DEFAULT 0,
+  store_id uuid REFERENCES stores(id) ON DELETE CASCADE,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
+);
+
+ALTER TABLE atendente_sessoes ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "owner_manager_full_atendente" ON atendente_sessoes
+  FOR ALL USING (has_role('owner'::app_role, store_id) OR has_role('manager'::app_role, store_id));
+
+CREATE POLICY "operator_read_atendente" ON atendente_sessoes
+  FOR SELECT USING (has_role('operator'::app_role, store_id));
+
+CREATE TRIGGER set_atendente_sessoes_updated_at
+  BEFORE UPDATE ON atendente_sessoes
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+
+-- ============================================================
+-- Migration: 20260823210000_estoque_movimentacoes.sql
+-- ============================================================
+
+-- =============================================
+-- Histórico de Movimentações de Estoque
+-- =============================================
+
+CREATE TABLE IF NOT EXISTS estoque_movimentacoes (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  estoque_id uuid REFERENCES estoque(id) ON DELETE CASCADE,
+  tipo text NOT NULL DEFAULT 'saida',
+  quantidade numeric NOT NULL,
+  motivo text,
+  responsavel text,
+  observacao text,
+  store_id uuid REFERENCES stores(id) ON DELETE CASCADE,
+  created_at timestamptz DEFAULT now()
+);
+
+-- RLS
+ALTER TABLE estoque_movimentacoes ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "owner_manager_full_movimentacoes" ON estoque_movimentacoes
+  FOR ALL USING (has_role('owner'::app_role, store_id) OR has_role('manager'::app_role, store_id));
+
+CREATE POLICY "operator_read_movimentacoes" ON estoque_movimentacoes
+  FOR SELECT USING (has_role('operator'::app_role, store_id));
+
+-- Índices
+CREATE INDEX IF NOT EXISTS idx_movimentacoes_estoque ON estoque_movimentacoes(estoque_id);
+CREATE INDEX IF NOT EXISTS idx_movimentacoes_store ON estoque_movimentacoes(store_id);
+CREATE INDEX IF NOT EXISTS idx_movimentacoes_data ON estoque_movimentacoes(created_at);
+
+-- Realtime
+ALTER TABLE estoque_movimentacoes REPLICA IDENTITY FULL;
+
+
+-- ============================================================
+-- Migration: 20260823220000_auto_vincular_clientes.sql
+-- ============================================================
+
+-- =============================================
+-- Vincula pedidos a clientes automaticamente
+-- =============================================
+
+-- 1. Adiciona coluna cliente_id na tabela pedidos
+ALTER TABLE public.pedidos ADD COLUMN IF NOT EXISTS cliente_id uuid REFERENCES clientes(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_pedidos_cliente_id ON public.pedidos(cliente_id);
+
+-- 2. Função para upsert de cliente (cria ou atualiza por telefone)
+CREATE OR REPLACE FUNCTION public.upsert_cliente(
+    p_store_id uuid,
+    p_nome text,
+    p_telefone text,
+    p_endereco text,
+    p_origem text DEFAULT 'site'
+)
+RETURNS uuid
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    v_cliente_id uuid;
+    v_telefone_limpo text;
+BEGIN
+    -- Normalizar telefone (remover espaços, traços, parênteses)
+    v_telefone_limpo := regexp_replace(COALESCE(p_telefone, ''), '[^0-9+]', '', 'g');
+
+    -- Se não tem telefone, não cadastra
+    IF v_telefone_limpo = '' OR v_telefone_limpo IS NULL THEN
+        RETURN NULL;
+    END IF;
+
+    -- Buscar cliente existente por telefone
+    SELECT id INTO v_cliente_id
+    FROM public.clientes
+    WHERE store_id = p_store_id
+      AND regexp_replace(COALESCE(telefone, ''), '[^0-9+]', '', 'g') = v_telefone_limpo
+    LIMIT 1;
+
+    IF v_cliente_id IS NOT NULL THEN
+        -- Atualizar dados do cliente existente
+        UPDATE public.clientes SET
+            nome = COALESCE(p_nome, nome),
+            endereco = COALESCE(NULLIF(p_endereco, ''), endereco),
+            total_pedidos = total_pedidos + 1,
+            ultimo_pedido = now(),
+            updated_at = now()
+        WHERE id = v_cliente_id;
+    ELSE
+        -- Criar novo cliente
+        INSERT INTO public.clientes (nome, telefone, endereco, origem, tier, total_pedidos, total_gasto, ultimo_pedido, store_id)
+        VALUES (
+            COALESCE(p_nome, 'Cliente'),
+            p_telefone,
+            COALESCE(NULLIF(p_endereco, ''), ''),
+            COALESCE(p_origem, 'site'),
+            'Novo',
+            1,
+            0,
+            now(),
+            p_store_id
+        )
+        RETURNING id INTO v_cliente_id;
+    END IF;
+
+    RETURN v_cliente_id;
+END;
+$$;
+
+-- 3. Atualizar create_order_v2 para vincular cliente automaticamente
+CREATE OR REPLACE FUNCTION public.create_order_v2(
+    p_store_id uuid,
+    p_idempotency_key text,
+    p_numero text,
+    p_cliente text,
+    p_telefone text,
+    p_endereco text,
+    p_canal text,
+    p_pagamento text,
+    p_cupom_codigo text,
+    p_itens jsonb,
+    p_origem text,
+    p_observacao text,
+    p_webhook_payload jsonb DEFAULT NULL
+)
+RETURNS json
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    v_pedido_id uuid;
+    v_existing_pedido_id uuid;
+    v_subtotal numeric := 0;
+    v_desconto numeric := 0;
+    v_taxa_entrega numeric := 0;
+    v_total numeric := 0;
+    v_menu_item record;
+    v_cupom record;
+    v_item_json jsonb;
+    v_hoje_dow integer := extract(dow from now());
+    v_cliente_id uuid;
+BEGIN
+    -- Idempotency check
+    INSERT INTO public.idempotency_keys (store_id, idempotency_key)
+    VALUES (p_store_id, p_idempotency_key)
+    ON CONFLICT (store_id, idempotency_key) DO NOTHING;
+
+    SELECT pedido_id INTO v_existing_pedido_id
+    FROM public.idempotency_keys
+    WHERE store_id = p_store_id AND idempotency_key = p_idempotency_key
+    FOR UPDATE;
+
+    IF v_existing_pedido_id IS NOT NULL THEN
+        RETURN json_build_object('ok', true, 'pedido_id', v_existing_pedido_id, 'status', 'idempotent');
+    END IF;
+
+    -- Upsert cliente automaticamente
+    v_cliente_id := public.upsert_cliente(p_store_id, p_cliente, p_telefone, p_endereco, p_origem);
+
+    -- Calculate subtotal using product_id (preferred) or nome (fallback)
+    FOR v_item_json IN SELECT * FROM jsonb_array_elements(p_itens)
+    LOOP
+        IF v_item_json ? 'product_id' THEN
+            SELECT * INTO v_menu_item FROM public.menu_items WHERE id = (v_item_json->>'product_id')::uuid AND store_id = p_store_id AND ativo = true;
+        ELSE
+            SELECT * INTO v_menu_item FROM public.menu_items WHERE nome = (v_item_json->>'nome') AND store_id = p_store_id AND ativo = true;
+        END IF;
+
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'Item indisponível: %', COALESCE(v_item_json->>'nome', v_item_json->>'product_id');
+        END IF;
+
+        v_subtotal := v_subtotal + (v_menu_item.preco * (v_item_json->>'qtd')::numeric);
+    END LOOP;
+
+    -- Delivery fee
+    IF p_canal = 'delivery' THEN
+        SELECT taxa_entrega INTO v_taxa_entrega FROM public.configuracoes_loja WHERE store_id = p_store_id;
+    END IF;
+    v_taxa_entrega := COALESCE(v_taxa_entrega, 0);
+
+    -- Advanced Coupon Validation
+    IF p_cupom_codigo IS NOT NULL AND p_cupom_codigo <> '' THEN
+        SELECT * INTO v_cupom FROM public.cupons WHERE store_id = p_store_id AND codigo = p_cupom_codigo AND ativo = true;
+
+        IF NOT FOUND THEN RAISE EXCEPTION 'Cupom inválido'; END IF;
+        
+        IF now() < COALESCE(v_cupom.inicio, now()) OR now() > COALESCE(v_cupom.fim, now()) THEN RAISE EXCEPTION 'Cupom expirado'; END IF;
+        IF v_cupom.limite_total IS NOT NULL AND v_cupom.usos >= v_cupom.limite_total THEN RAISE EXCEPTION 'Cupom esgotado'; END IF;
+        IF v_subtotal < COALESCE(v_cupom.minimo, 0) AND NOT COALESCE(v_cupom.total_minimo_zero, false) THEN RAISE EXCEPTION 'Pedido mínimo não atingido'; END IF;
+
+        IF v_cupom.canal <> 'todos' AND v_cupom.canal <> p_canal THEN RAISE EXCEPTION 'Cupom não válido para este canal'; END IF;
+
+        IF NOT (v_hoje_dow = ANY(v_cupom.dias_semana)) THEN RAISE EXCEPTION 'Cupom não válido hoje'; END IF;
+
+        IF v_cupom.tipo = 'percentual' THEN
+            v_desconto := (v_subtotal * v_cupom.valor) / 100;
+        ELSE
+            v_desconto := v_cupom.valor;
+        END IF;
+        
+        IF v_cupom.frete_gratis THEN v_taxa_entrega := 0; END IF;
+    END IF;
+
+    v_total := v_subtotal + v_taxa_entrega - v_desconto;
+    IF v_total < 0 THEN v_total := 0; END IF;
+
+    -- Create order with cliente_id link
+    INSERT INTO public.pedidos (
+        numero, cliente, telefone, endereco, canal, pagamento,
+        cupom_codigo, itens, subtotal, desconto, taxa_entrega, total,
+        status, origem, observacao, store_id, cliente_id
+    ) VALUES (
+        p_numero, p_cliente, p_telefone, p_endereco, p_canal, p_pagamento,
+        p_cupom_codigo, p_itens, v_subtotal, v_desconto, v_taxa_entrega, v_total,
+        'novo', p_origem, p_observacao, p_store_id, v_cliente_id
+    ) RETURNING id INTO v_pedido_id;
+
+    UPDATE public.idempotency_keys SET pedido_id = v_pedido_id WHERE store_id = p_store_id AND idempotency_key = p_idempotency_key;
+    
+    IF v_cupom.id IS NOT NULL THEN
+        UPDATE public.cupons SET usos = usos + 1 WHERE id = v_cupom.id;
+    END IF;
+
+    IF p_webhook_payload IS NOT NULL THEN
+        INSERT INTO public.webhook_logs (store_id, pedido_id, status, payload, evento)
+        VALUES (p_store_id, v_pedido_id, 'ok', p_webhook_payload, 'pedido.recebido');
+    END IF;
+
+    RETURN json_build_object('ok', true, 'pedido_id', v_pedido_id, 'cliente_id', v_cliente_id);
+END;
+$$;
+
+-- Permissões
+REVOKE ALL ON FUNCTION public.upsert_cliente(uuid, text, text, text, text) FROM PUBLIC, authenticated, anon;
+GRANT EXECUTE ON FUNCTION public.upsert_cliente(uuid, text, text, text, text) TO service_role;
+
+
+-- ============================================================
+-- Migration: 20260823230000_estoque_pacotes.sql
+-- ============================================================
+
+-- =============================================
+-- Sistema de Pacotes no Estoque
+-- =============================================
+
+-- Adicionar campos de pacote na tabela estoque
+ALTER TABLE public.estoque ADD COLUMN IF NOT EXISTS preco_pacote numeric DEFAULT 0;
+ALTER TABLE public.estoque ADD COLUMN IF NOT EXISTS quantidade_por_pacote numeric DEFAULT 1;
+ALTER TABLE public.estoque ADD COLUMN IF NOT EXISTS unidade_pacote text DEFAULT '';
+ALTER TABLE public.estoque ADD COLUMN IF NOT EXISTS fornecedor text DEFAULT '';
+ALTER TABLE public.estoque ADD COLUMN IF NOT EXISTS ultimo_preco_pacote numeric DEFAULT 0;
+
+-- Comentários nas colunas
+COMMENT ON COLUMN public.estoque.preco_pacote IS 'Preço total do pacote fechado';
+COMMENT ON COLUMN public.estoque.quantidade_por_pacote IS 'Quantidade que vem no pacote (ex: 50 para saco de 50kg)';
+COMMENT ON COLUMN public.estoque.unidade_pacote IS 'Unidade de medida do pacote (kg, L, un)';
+COMMENT ON COLUMN public.estoque.fornecedor IS 'Nome do fornecedor';
+COMMENT ON COLUMN public.estoque.ultimo_preco_pacote IS 'Último preço registrado do pacote (para comparação)';
+
+-- Atualizar seed de estoque com exemplos de pacotes
+DO $$
+DECLARE
+  v_store_id uuid;
+BEGIN
+  SELECT id INTO v_store_id FROM stores LIMIT 1;
+  IF v_store_id IS NULL THEN RETURN; END IF;
+
+  -- Atualizar farinha (se existir)
+  UPDATE estoque SET
+    preco_pacote = 120,
+    quantidade_por_pacote = 50,
+    unidade_pacote = 'kg',
+    fornecedor = 'Fornecedor Padrão',
+    ultimo_preco_pacote = 120
+  WHERE nome = 'Massa de pizza' AND store_id = v_store_id;
+
+  -- Atualizar mussarela
+  UPDATE estoque SET
+    preco_pacote = 320,
+    quantidade_por_pacote = 10,
+    unidade_pacote = 'kg',
+    fornecedor = 'Laticínios Boi Gordo',
+    ultimo_preco_pacote = 320
+  WHERE nome = 'Mussarela' AND store_id = v_store_id;
+
+  -- Atualizar catupiry
+  UPDATE estoque SET
+    preco_pacote = 140,
+    quantidade_por_pacote = 5,
+    unidade_pacote = 'kg',
+    fornecedor = 'Catupiry Original',
+    ultimo_preco_pacote = 140
+  WHERE nome = 'Catupiry' AND store_id = v_store_id;
+
+  -- Atualizar tomate
+  UPDATE estoque SET
+    preco_pacote = 45,
+    quantidade_por_pacote = 25,
+    unidade_pacote = 'kg',
+    fornecedor = 'Hortifruti Local',
+    ultimo_preco_pacote = 45
+  WHERE nome = 'Tomate' AND store_id = v_store_id;
+
+  -- Atualizar cebola
+  UPDATE estoque SET
+    preco_pacote = 35,
+    quantidade_por_pacote = 20,
+    unidade_pacote = 'kg',
+    fornecedor = 'Hortifruti Local',
+    ultimo_preco_pacote = 35
+  WHERE nome = 'Cebola' AND store_id = v_store_id;
+
+  -- Atualizar calabresa
+  UPDATE estoque SET
+    preco_pacote = 250,
+    quantidade_por_pacote = 10,
+    unidade_pacote = 'kg',
+    fornecedor = 'Frigorífico Central',
+    ultimo_preco_pacote = 250
+  WHERE nome = 'Calabresa' AND store_id = v_store_id;
+
+  -- Atualizar frango
+  UPDATE estoque SET
+    preco_pacote = 90,
+    quantidade_por_pacote = 5,
+    unidade_pacote = 'kg',
+    fornecedor = 'Aviário São João',
+    ultimo_preco_pacote = 90
+  WHERE nome = 'Frango' AND store_id = v_store_id;
+
+  -- Atualizar chocolate
+  UPDATE estoque SET
+    preco_pacote = 90,
+    quantidade_por_pacote = 5,
+    unidade_pacote = 'kg',
+    fornecedor = 'Chocolate Premium',
+    ultimo_preco_pacote = 90
+  WHERE nome = 'Chocolate' AND store_id = v_store_id;
+
+  -- Inserir novos itens de estoque com pacotes
+  INSERT INTO estoque (nome, categoria, unidade, quantidade_atual, quantidade_minima, custo_unitario, preco_pacote, quantidade_por_pacote, unidade_pacote, fornecedor, store_id)
+  VALUES
+    ('Farinha de Trigo', 'Massas', 'kg', 25, 10, 2.4, 120, 50, 'kg', 'Moinho Central', v_store_id),
+    ('Açúcar', 'Outros', 'kg', 10, 5, 3.5, 45, 20, 'kg', 'Distribuidora ABC', v_store_id),
+    ('Óleo', 'Outros', 'L', 8, 3, 5, 42, 12, 'L', 'Refinaria Sul', v_store_id),
+    ('Sal', 'Outros', 'kg', 5, 2, 1.8, 18, 10, 'kg', 'Salinas PR', v_store_id),
+    ('Fermento', 'Massas', 'kg', 2, 1, 12, 48, 4, 'kg', 'Panificadora Total', v_store_id),
+    ('Molho de Tomate', 'Legumes', 'kg', 8, 3, 4, 32, 8, 'kg', 'Indústria Alimenc', v_store_id)
+  ON CONFLICT DO NOTHING;
+END $$;
+
+
+-- ============================================================
+-- Migration: 20260905000000_add_bot_mensagens.sql
+-- ============================================================
+
+ALTER TABLE configuracoes_loja
+  ADD COLUMN IF NOT EXISTS bot_mensagens boolean NOT NULL DEFAULT false;
+
+
+-- ============================================================
+-- Migration: 20260907000000_hardening_followup.sql
+-- ============================================================
+
+-- The role-based policies introduced in 2026-08 call has_role().
+-- Keep the helper safe (SECURITY DEFINER + fixed search_path) while allowing
+-- authenticated sessions to evaluate policies through it.
+GRANT EXECUTE ON FUNCTION public.has_role(uuid, public.app_role, uuid) TO authenticated;
+
+-- Public menu responses must never expose internal costs. This is enforced in
+-- the API route too, but the column remains private at the database boundary.
+REVOKE SELECT (custo) ON public.menu_items FROM anon;
+
+
+-- ============================================================
+-- Migration: 20260908000000_remove_legacy_permissive_policies.sql
+-- ============================================================
+
+-- Defense in depth for databases upgraded from the original single-store schema.
+-- PostgreSQL combines permissive policies with OR, so legacy USING (true)
+-- policies must not remain alongside the role-based multi-tenant policies.
+DROP POLICY IF EXISTS "Painel le pedidos" ON public.pedidos;
+DROP POLICY IF EXISTS "Painel cria pedidos" ON public.pedidos;
+DROP POLICY IF EXISTS "Painel edita pedidos" ON public.pedidos;
+DROP POLICY IF EXISTS "Painel apaga pedidos" ON public.pedidos;
+
+DROP POLICY IF EXISTS "Painel le cupons" ON public.cupons;
+DROP POLICY IF EXISTS "Painel cria cupons" ON public.cupons;
+DROP POLICY IF EXISTS "Painel edita cupons" ON public.cupons;
+DROP POLICY IF EXISTS "Painel apaga cupons" ON public.cupons;
+
+DROP POLICY IF EXISTS "Painel le config" ON public.configuracoes_loja;
+DROP POLICY IF EXISTS "Painel cria config" ON public.configuracoes_loja;
+DROP POLICY IF EXISTS "Painel edita config" ON public.configuracoes_loja;
+
+DROP POLICY IF EXISTS "Painel le logs" ON public.webhook_logs;
+DROP POLICY IF EXISTS "Painel apaga logs" ON public.webhook_logs;
+
+
