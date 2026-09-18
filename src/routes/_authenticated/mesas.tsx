@@ -23,7 +23,7 @@ function MesasPage() {
     setLoading(true);
     const [{ data: mesasData }, { data: pedidosData }] = await Promise.all([
       supabase.from("tables" as any).select("id,status,data,updated_at").order("id"),
-      supabase.from("orders" as any).select("id,table_id,total,status").eq("channel", "mesa").in("status", ["pending", "confirmed"]),
+      supabase.from("pedidos" as any).select("id,mesa_id,itens,total,status").eq("canal", "mesa").in("status", ["novo", "em_preparo", "producao"]),
     ]);
     setMesas(((mesasData ?? []) as any[]).map((row) => ({ id: row.id, numero: Number(row.data?.numero ?? (String(row.id).replace(/\D/g, "") || 0)), nome: row.data?.nome ?? "", pessoas: Number(row.data?.pessoas ?? 0), status: row.status === "aberta" ? "aberta" : "livre", updated_at: row.updated_at })));
     setPedidos((pedidosData ?? []) as unknown as Pedido[]);
@@ -31,7 +31,7 @@ function MesasPage() {
   };
   useEffect(() => {
     void carregar();
-    const channel = supabase.channel("mesas-painel").on("postgres_changes", { event: "*", schema: "public", table: "tables" }, () => void carregar()).on("postgres_changes", { event: "*", schema: "public", table: "orders" }, () => void carregar()).subscribe();
+    const channel = supabase.channel("mesas-painel").on("postgres_changes", { event: "*", schema: "public", table: "mesas" }, () => void carregar()).on("postgres_changes", { event: "*", schema: "public", table: "pedidos" }, () => void carregar()).subscribe();
     return () => { void supabase.removeChannel(channel); };
   }, []);
   const abertas = mesas.filter((m) => m.status === "aberta");

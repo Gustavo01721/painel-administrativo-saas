@@ -468,7 +468,7 @@ export function PizzaProvider({ children }: { children: ReactNode }) {
   const setOrderStatus = useCallback(async (id: string, status: OrderStatus) => {
     setAllOrders((prev) => prev.map((o) => (o.id === id ? { ...o, status } : o)));
     const dbStatus = status === "novo" ? "pending" : status === "producao" ? "confirmed" : status;
-    const { error } = await supabase.from("orders" as any).update({ status: dbStatus }).eq("id", id);
+    const { error } = await supabase.from("pedidos" as any).update({ status: dbStatus }).eq("id", id);
     if (error) {
       toast.error("Não foi possível atualizar o pedido");
       return;
@@ -478,7 +478,7 @@ export function PizzaProvider({ children }: { children: ReactNode }) {
 
   const removeOrder = useCallback(async (id: string) => {
     setAllOrders((prev) => prev.filter((o) => o.id !== id));
-    const { error } = await supabase.from("orders" as any).delete().eq("id", id);
+    const { error } = await supabase.from("pedidos" as any).delete().eq("id", id);
     if (error) toast.error("Não foi possível remover o pedido");
   }, []);
 
