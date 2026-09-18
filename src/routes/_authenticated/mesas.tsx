@@ -25,7 +25,7 @@ function MesasPage() {
       supabase.from("tables" as any).select("id,status,data,updated_at").order("id"),
       supabase.from("orders" as any).select("id,table_id,total,status").eq("channel", "mesa").in("status", ["pending", "confirmed"]),
     ]);
-    setMesas(((mesasData ?? []) as any[]).map((row) => ({ id: row.id, numero: Number(row.data?.numero ?? String(row.id).replace(/\D/g, "") || 0), nome: row.data?.nome ?? "", pessoas: Number(row.data?.pessoas ?? 0), status: row.status === "aberta" ? "aberta" : "livre", updated_at: row.updated_at })));
+    setMesas(((mesasData ?? []) as any[]).map((row) => ({ id: row.id, numero: Number(row.data?.numero ?? (String(row.id).replace(/\D/g, "") || 0)), nome: row.data?.nome ?? "", pessoas: Number(row.data?.pessoas ?? 0), status: row.status === "aberta" ? "aberta" : "livre", updated_at: row.updated_at })));
     setPedidos((pedidosData ?? []) as unknown as Pedido[]);
     setLoading(false);
   };
