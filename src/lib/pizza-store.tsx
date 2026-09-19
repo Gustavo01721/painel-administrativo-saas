@@ -287,8 +287,9 @@ export function PizzaProvider({ children }: { children: ReactNode }) {
 
   /* --------------------------- carga inicial --------------------------- */
   const load = useCallback(async () => {
-    const [pedidos, cupons, config, estoqueData, receitasData, clientesData, movData, menuData] = await Promise.all([
-      supabase.from("pedidos" as any).select("*").order("created_at", { ascending: false }).limit(500),
+    const [pedidos, itensData, cupons, config, estoqueData, receitasData, clientesData, movData, menuData] = await Promise.all([
+      supabase.from("orders" as any).select("*").order("created_at", { ascending: false }).limit(500),
+      supabase.from("order_items" as any).select("*").order("created_at", { ascending: true }),
       supabase.from("cupons").select("*").order("created_at", { ascending: false }),
       supabase.from("configuracoes_loja").select("*").limit(1).maybeSingle(),
       supabase.from("estoque").select("*").order("nome"),
@@ -298,7 +299,7 @@ export function PizzaProvider({ children }: { children: ReactNode }) {
       supabase.from("menu_items").select("*").order("nome"),
     ]);
 
-    const loadErrors = [pedidos, cupons, estoqueData, receitasData, clientesData, movData, menuData]
+    const loadErrors = [pedidos, itensData, cupons, estoqueData, receitasData, clientesData, movData, menuData]
       .map((result) => result.error)
       .filter(Boolean);
     if (loadErrors.length > 0) {
@@ -309,7 +310,13 @@ export function PizzaProvider({ children }: { children: ReactNode }) {
     }
 
     if (pedidos.data) {
-      setAllOrders(pedidos.data.map((row: any) => mapOrder(row)));
+      const itemsByOrder = new Map<string, any[]>();
+      for (const item of (itensData.data ?? []) as any[]) {
+        const items = itemsByOrder.get(item.order_id) ?? [];
+        items.push(item);
+        itemsByOrder.set(item.order_id, items);
+      }
+      setAllOrders(pedidos.data.map((row: any) => mapSiteOrder(row, itemsByOrder.get(row.id) ?? [])));
     }
     if (cupons.data) setCoupons(cupons.data.map(mapCoupon));
     if (estoqueData.data) {
@@ -423,7 +430,7 @@ export function PizzaProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const channel = supabase
       .channel("painel-fornalha")
-      .on("postgres_changes", { event: "*", schema: "public", table: "pedidos" }, (payload) => {
+      .on("postgres_changes", { event: "*", schema: "public", table: "orders" }, (payload) => {
         if (payload.eventType === "INSERT") {
           const o = mapSiteOrder(payload.new);
           setAllOrders((prev) => (prev.some((p) => p.id === o.id) ? prev : [o, ...prev]));
@@ -468,7 +475,7 @@ export function PizzaProvider({ children }: { children: ReactNode }) {
   const setOrderStatus = useCallback(async (id: string, status: OrderStatus) => {
     setAllOrders((prev) => prev.map((o) => (o.id === id ? { ...o, status } : o)));
     const dbStatus = status === "novo" ? "pending" : status === "producao" ? "confirmed" : status;
-    const { error } = await supabase.from("pedidos" as any).update({ status: dbStatus }).eq("id", id);
+    const { error } = await supabase.from("orders" as any).update({ status: dbStatus }).eq("id", id);
     if (error) {
       toast.error("Não foi possível atualizar o pedido");
       return;
@@ -478,7 +485,7 @@ export function PizzaProvider({ children }: { children: ReactNode }) {
 
   const removeOrder = useCallback(async (id: string) => {
     setAllOrders((prev) => prev.filter((o) => o.id !== id));
-    const { error } = await supabase.from("pedidos" as any).delete().eq("id", id);
+    const { error } = await supabase.from("orders" as any).delete().eq("id", id);
     if (error) toast.error("Não foi possível remover o pedido");
   }, []);
 

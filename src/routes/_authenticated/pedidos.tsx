@@ -131,7 +131,7 @@ function PedidosPage() {
                           </li>
                         ))}
                       </ul>
-                      {o.canal === "delivery" && <select className="mt-2 h-8 w-full rounded-md border border-border bg-background px-2 text-xs" value={o.motoboyId ?? ""} onChange={(e) => { const id = e.target.value || null; void supabase.from("pedidos" as any).update({ motoboy_id: id }).eq("id", o.id).then(({ error }) => { if (error) toast.error("Não foi possível vincular o motoboy"); else toast.success(id ? "Motoboy vinculado ao pedido" : "Motoboy removido do pedido"); }); }}>{/* Motoboys are managed in Configurações. */}<option value="">Selecionar motoboy</option>{motoboys.map((m) => <option key={m.id} value={m.id}>{m.nome} · {m.whatsapp}</option>)}</select>}
+                      {o.canal === "delivery" && <select className="mt-2 h-8 w-full rounded-md border border-border bg-background px-2 text-xs" value={o.motoboyId ?? ""} onChange={(e) => { const id = e.target.value || null; void supabase.from("orders" as any).update({ motoboy_id: id }).eq("id", o.id).then(({ error }) => { if (error) toast.error("Não foi possível vincular o motoboy"); else toast.success(id ? "Motoboy vinculado ao pedido" : "Motoboy removido do pedido"); }); }}>{/* Motoboys are managed in Configurações. */}<option value="">Selecionar motoboy</option>{motoboys.map((m) => <option key={m.id} value={m.id}>{m.nome} · {m.whatsapp}</option>)}</select>}
                       {o.cupom && (
                         <span className="mt-2 inline-block rounded-md bg-primary-soft px-2 py-0.5 font-mono text-[10px] font-semibold text-primary">
                           {o.cupom} · -{currency(o.desconto)}
