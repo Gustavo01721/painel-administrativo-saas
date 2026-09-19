@@ -31,6 +31,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import { Package, AlertTriangle, Plus, Trash2, ArrowDown, ArrowUp, History } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/estoque")({
@@ -54,12 +55,16 @@ export const Route = createFileRoute("/_authenticated/estoque")({
 const categoriasFiltro = ["Todas", ...estoqueCategoriaOptions] as const;
 
 function EstoquePage() {
-  const { estoque, addEstoqueItem, updateEstoqueItem, removeEstoqueItem, movimentacoes, addMovimentacao } = usePizza();
+  const { estoque, addEstoqueItem, updateEstoqueItem, removeEstoqueItem, movimentacoes, addMovimentacao, substituicoes, addSubstituicao, updateSubstituicao, removeSubstituicao } = usePizza();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [dialogSaidaOpen, setDialogSaidaOpen] = useState(false);
   const [editando, setEditando] = useState<string | null>(null);
   const [filtro, setFiltro] = useState<(typeof categoriasFiltro)[number]>("Todas");
-  const [abaTab, setAbaTab] = useState<"estoque" | "movimentacoes">("estoque");
+  const [abaTab, setAbaTab] = useState<"estoque" | "movimentacoes" | "substituicoes">("estoque");
+  const [ingredienteId, setIngredienteId] = useState("");
+  const [substitutoId, setSubstitutoId] = useState("");
+  const [quantidadeSubstituta, setQuantidadeSubstituta] = useState("1");
+  const [ajustePreco, setAjustePreco] = useState("0");
 
   // Form novo item
   const [nome, setNome] = useState("");
@@ -287,6 +292,12 @@ function EstoquePage() {
           <History className="mr-1.5 inline size-4" />
           Histórico de Saídas
         </button>
+        <button
+          onClick={() => setAbaTab("substituicoes")}
+          className={`flex-1 rounded-md px-4 py-2 text-sm font-medium transition-colors ${abaTab === "substituicoes" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground"}`}
+        >
+          Substituições
+        </button>
       </div>
 
       {abaTab === "estoque" && (
@@ -426,6 +437,26 @@ function EstoquePage() {
               )}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {abaTab === "substituicoes" && (
+        <div className="space-y-4">
+          <div className="rounded-xl border border-border bg-card p-4">
+            <p className="mb-3 text-sm font-semibold text-foreground">Cadastrar substituição</p>
+            <div className="grid gap-3 md:grid-cols-5">
+              <Select value={ingredienteId} onValueChange={setIngredienteId}><SelectTrigger><SelectValue placeholder="Ingrediente em falta" /></SelectTrigger><SelectContent>{estoque.map((e) => <SelectItem key={e.id} value={e.id}>{e.nome}</SelectItem>)}</SelectContent></Select>
+              <Select value={substitutoId} onValueChange={setSubstitutoId}><SelectTrigger><SelectValue placeholder="Substituto disponível" /></SelectTrigger><SelectContent>{estoque.filter((e) => e.id !== ingredienteId && e.quantidadeAtual > 0).map((e) => <SelectItem key={e.id} value={e.id}>{e.nome} ({e.quantidadeAtual} {e.unidade})</SelectItem>)}</SelectContent></Select>
+              <Input type="number" min="0.01" step="0.01" value={quantidadeSubstituta} onChange={(e) => setQuantidadeSubstituta(e.target.value)} placeholder="Quantidade" />
+              <Input type="number" step="0.01" value={ajustePreco} onChange={(e) => setAjustePreco(e.target.value)} placeholder="Ajuste R$" />
+              <Button onClick={async () => { if (!ingredienteId || !substitutoId || Number(quantidadeSubstituta) <= 0) { toast.error("Escolha os ingredientes e a quantidade"); return; } await addSubstituicao({ ingredienteId, substitutoId, quantidadeSubstituta: Number(quantidadeSubstituta), ajustePreco: Number(ajustePreco || 0), ativo: true }); setIngredienteId(""); setSubstitutoId(""); }}>Adicionar</Button>
+            </div>
+            <p className="mt-2 text-xs text-muted-foreground">Só ingredientes com estoque disponível aparecem como substitutos.</p>
+          </div>
+          <div className="overflow-hidden rounded-xl border border-border">
+            <table className="w-full text-sm"><thead><tr className="border-b border-border bg-surface-hover"><th className="px-4 py-3 text-left text-xs text-muted-foreground">Em falta</th><th className="px-4 py-3 text-left text-xs text-muted-foreground">Substituto</th><th className="px-4 py-3 text-right text-xs text-muted-foreground">Qtd.</th><th className="px-4 py-3 text-right text-xs text-muted-foreground">Ajuste</th><th className="px-4 py-3 text-center text-xs text-muted-foreground">Ativo</th><th /></tr></thead><tbody className="divide-y divide-border">{substituicoes.map((s) => { const a = estoque.find((e) => e.id === s.ingredienteId); const b = estoque.find((e) => e.id === s.substitutoId); return <tr key={s.id}><td className="px-4 py-3">{a?.nome ?? "—"}</td><td className="px-4 py-3">{b?.nome ?? "—"} <span className="text-xs text-muted-foreground">({b?.quantidadeAtual ?? 0} {b?.unidade})</span></td><td className="px-4 py-3 text-right">{s.quantidadeSubstituta}</td><td className="px-4 py-3 text-right">{currency(s.ajustePreco)}</td><td className="px-4 py-3 text-center"><Switch checked={s.ativo} onCheckedChange={(ativo: boolean) => void updateSubstituicao(s.id, { ativo })} /></td><td className="px-4 py-3 text-right"><Button variant="ghost" size="sm" className="text-destructive" onClick={() => void removeSubstituicao(s.id)}><Trash2 className="size-3" /></Button></td></tr>; })}</tbody></table>
+            {substituicoes.length === 0 && <p className="p-8 text-center text-sm text-muted-foreground">Nenhuma substituição cadastrada.</p>}
+          </div>
         </div>
       )}
 

@@ -19,6 +19,13 @@ const payloadSchema = z.object({
   })).min(1).max(60),
   origem: z.string().max(40).default("site"),
   observacao: z.string().max(500).optional(),
+  substituicoes: z.array(z.object({
+    receita_item_id: z.string().uuid().optional(),
+    ingrediente_id: z.string().uuid(),
+    substituto_id: z.string().uuid(),
+    quantidade: z.number().positive(),
+    ajuste_preco: z.number().optional(),
+  })).max(60).default([]),
 });
 
 const corsHeaders = (origin: string | null) => {
@@ -127,6 +134,25 @@ export const Route = createFileRoute("/api/public/pedidos")({
 
         const data = parsed.data;
         const numero = data.numero ?? `PED-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
+
+        // Revalida disponibilidade no servidor e nunca aceita substituto fora da loja.
+        const productIds = data.itens.map((item) => item.product_id).filter((id): id is string => Boolean(id));
+        const { data: recipes } = await supabaseAdmin
+          .from("receita_itens")
+          .select("menu_item_id,estoque_id,quantidade_necessaria,estoque:estoque_id(id,nome,quantidade_atual)")
+          .eq("store_id", apiKeyEntry.store_id)
+          .in("menu_item_id", productIds.length ? productIds : ["00000000-0000-0000-0000-000000000000"]);
+        const { data: rules } = await (supabaseAdmin.from("ingrediente_substituicoes" as any) as any)
+          .select("ingrediente_id,substituto_id,quantidade_substituta,ajuste_preco,ativo,substituto:substituto_id(id,nome,quantidade_atual)")
+          .eq("store_id", apiKeyEntry.store_id).eq("ativo", true);
+        const selected = new Set(data.substituicoes.map((item) => `${item.ingrediente_id}:${item.substituto_id}`));
+        for (const recipe of recipes ?? []) {
+          const stock = Array.isArray(recipe.estoque) ? recipe.estoque[0] : recipe.estoque;
+          const requested = data.itens.find((item) => item.product_id === recipe.menu_item_id)?.qtd ?? 1;
+          if (Number(stock?.quantidade_atual ?? 0) >= Number(recipe.quantidade_necessaria) * requested) continue;
+          const validRule = (rules ?? []).find((rule: any) => rule.ingrediente_id === recipe.estoque_id && selected.has(`${rule.ingrediente_id}:${rule.substituto_id}`) && Number(rule.substituto?.quantidade_atual ?? 0) >= Number(rule.quantidade_substituta) * requested);
+          if (!validRule) return json({ ok: false, error: `Este sabor está sem ${stock?.nome ?? "ingrediente"}.`, substituicoes: (rules ?? []).filter((rule: any) => rule.ingrediente_id === recipe.estoque_id && Number(rule.substituto?.quantidade_atual ?? 0) >= Number(rule.quantidade_substituta) * requested) }, 409);
+        }
 
         const { data: result, error: rpcError } = await (supabaseAdmin as any).rpc("create_order_v2", {
           p_store_id: apiKeyEntry.store_id,

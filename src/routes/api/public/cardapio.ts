@@ -50,7 +50,7 @@ export const Route = createFileRoute("/api/public/cardapio")({
         try {
           const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
-          const [menuResult, configResult] = await Promise.all([
+          const [menuResult, configResult, stockResult, recipeResult, substitutionResult] = await Promise.all([
             supabaseAdmin
               .from("menu_items")
               .select("id, nome, categoria, preco, ativo")
@@ -64,6 +64,9 @@ export const Route = createFileRoute("/api/public/cardapio")({
               .eq("store_id", storeId.data)
               .limit(1)
               .maybeSingle(),
+            supabaseAdmin.from("estoque").select("id,nome,quantidade_atual,unidade").eq("store_id", storeId.data),
+            supabaseAdmin.from("receita_itens").select("menu_item_id,estoque_id,quantidade_necessaria").eq("store_id", storeId.data),
+            (supabaseAdmin.from("ingrediente_substituicoes" as any) as any).select("id,ingrediente_id,substituto_id,quantidade_substituta,ajuste_preco,ativo").eq("store_id", storeId.data).eq("ativo", true),
           ]);
 
           if (menuResult.error) {
@@ -72,6 +75,20 @@ export const Route = createFileRoute("/api/public/cardapio")({
 
           const categorias: Record<string, unknown[]> = {};
           const sabores: Array<{ nome: string; categoria: string }> = [];
+          const stock = new Map((stockResult.data ?? []).map((item: any) => [item.id, item]));
+          const rules = substitutionResult.data ?? [];
+          const availability = new Map<string, { ingrediente: string; substitutos: unknown[] }>();
+          for (const recipe of recipeResult.data ?? []) {
+            const ingredient: any = stock.get(recipe.estoque_id);
+            if (!ingredient || Number(ingredient.quantidade_atual) >= Number(recipe.quantidade_necessaria)) continue;
+            const substitutes = rules.filter((rule: any) => rule.ingrediente_id === recipe.estoque_id).map((rule: any) => {
+              const replacement: any = stock.get(rule.substituto_id);
+              return replacement && Number(replacement.quantidade_atual) >= Number(rule.quantidade_substituta)
+                ? { id: rule.id, ingredienteId: rule.ingrediente_id, substitutoId: rule.substituto_id, ingrediente: ingredient.nome, substituto: replacement.nome, quantidade: Number(rule.quantidade_substituta), ajustePreco: Number(rule.ajuste_preco ?? 0) }
+                : null;
+            }).filter(Boolean);
+            if (recipe.menu_item_id) availability.set(recipe.menu_item_id, { ingrediente: ingredient?.nome ?? "ingrediente", substitutos: substitutes });
+          }
 
           for (const item of menuResult.data ?? []) {
             const cat = item.categoria;
@@ -82,6 +99,15 @@ export const Route = createFileRoute("/api/public/cardapio")({
               nome: item.nome,
               preco: Number(item.preco),
             };
+            const issue = availability.get(item.id);
+            if (issue) {
+              entry.disponibilidade = issue.substitutos.length ? "substituicao" : "indisponivel";
+              entry.ingredienteEmFalta = issue.ingrediente;
+              entry.aviso = issue.substitutos.length
+                ? `${issue.ingrediente} está em falta. Deseja substituir?`
+                : `Este sabor está sem ${issue.ingrediente}.`;
+              entry.substituicoes = issue.substitutos;
+            }
 
             categorias[cat].push(entry);
 

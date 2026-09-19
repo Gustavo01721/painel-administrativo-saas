@@ -31,6 +31,7 @@ import {
   type BannerPosicao,
   type EstoqueItem,
   type ReceitaItem,
+  type IngredienteSubstituicao,
   type Cliente,
   type MovimentacaoEstoque,
 } from "@/lib/pizza-data";
@@ -141,6 +142,10 @@ type Ctx = {
   receitas: ReceitaItem[];
   addReceita: (item: Omit<ReceitaItem, "id">) => Promise<void>;
   removeReceita: (id: string) => Promise<void>;
+  substituicoes: IngredienteSubstituicao[];
+  addSubstituicao: (item: Omit<IngredienteSubstituicao, "id" | "storeId">) => Promise<void>;
+  updateSubstituicao: (id: string, patch: Partial<IngredienteSubstituicao>) => Promise<void>;
+  removeSubstituicao: (id: string) => Promise<void>;
   baixarEstoque: (itens: OrderItem[]) => Promise<void>;
   clientes: Cliente[];
   addCliente: (item: Omit<Cliente, "id">) => Promise<void>;
@@ -268,6 +273,7 @@ export function PizzaProvider({ children }: { children: ReactNode }) {
   const [search, setSearch] = useState("");
   const [estoque, setEstoque] = useState<EstoqueItem[]>([]);
   const [receitas, setReceitas] = useState<ReceitaItem[]>([]);
+  const [substituicoes, setSubstituicoes] = useState<IngredienteSubstituicao[]>([]);
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [movimentacoes, setMovimentacoes] = useState<MovimentacaoEstoque[]>([]);
   const firstLoad = useRef(true);
@@ -287,19 +293,20 @@ export function PizzaProvider({ children }: { children: ReactNode }) {
 
   /* --------------------------- carga inicial --------------------------- */
   const load = useCallback(async () => {
-    const [pedidos, itensData, cupons, config, estoqueData, receitasData, clientesData, movData, menuData] = await Promise.all([
+    const [pedidos, itensData, cupons, config, estoqueData, receitasData, substituicoesData, clientesData, movData, menuData] = await Promise.all([
       supabase.from("orders" as any).select("*").order("created_at", { ascending: false }).limit(500),
       supabase.from("order_items" as any).select("*").order("created_at", { ascending: true }),
       supabase.from("cupons").select("*").order("created_at", { ascending: false }),
       supabase.from("configuracoes_loja").select("*").limit(1).maybeSingle(),
       supabase.from("estoque").select("*").order("nome"),
       supabase.from("receita_itens").select("*"),
+      (supabase.from("ingrediente_substituicoes" as any) as any).select("*"),
       supabase.from("clientes").select("*").order("total_gasto", { ascending: false }),
       supabase.from("estoque_movimentacoes").select("*").order("created_at", { ascending: false }).limit(200),
       supabase.from("menu_items").select("*").order("nome"),
     ]);
 
-    const loadErrors = [pedidos, itensData, cupons, estoqueData, receitasData, clientesData, movData, menuData]
+    const loadErrors = [pedidos, itensData, cupons, estoqueData, receitasData, substituicoesData, clientesData, movData, menuData]
       .map((result) => result.error)
       .filter(Boolean);
     if (loadErrors.length > 0) {
@@ -347,6 +354,10 @@ export function PizzaProvider({ children }: { children: ReactNode }) {
         }))
       );
     }
+    if (substituicoesData.data) setSubstituicoes(substituicoesData.data.map((s: any) => ({
+      id: s.id, storeId: s.store_id, ingredienteId: s.ingrediente_id, substitutoId: s.substituto_id,
+      quantidadeSubstituta: Number(s.quantidade_substituta), ajustePreco: Number(s.ajuste_preco ?? 0), ativo: s.ativo,
+    })));
     if (clientesData.data) {
       setClientes(
         clientesData.data.map((c) => ({
@@ -459,6 +470,9 @@ export function PizzaProvider({ children }: { children: ReactNode }) {
         void load();
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "receita_itens" }, () => {
+        void load();
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "ingrediente_substituicoes" }, () => {
         void load();
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "menu_items" }, () => {
@@ -694,6 +708,31 @@ export function PizzaProvider({ children }: { children: ReactNode }) {
     setReceitas((prev) => prev.filter((r) => r.id !== id));
     const { error } = await supabase.from("receita_itens").delete().eq("id", id);
     if (error) toast.error(error.message);
+  }, []);
+
+  const addSubstituicao = useCallback<Ctx["addSubstituicao"]>(async (item) => {
+    const { data, error } = await supabase.from("ingrediente_substituicoes" as any).insert({
+      ingrediente_id: item.ingredienteId, substituto_id: item.substitutoId,
+      quantidade_substituta: item.quantidadeSubstituta, ajuste_preco: item.ajustePreco, ativo: item.ativo,
+    }).select().single();
+    if (error || !data) { toast.error(error?.message ?? "Erro ao criar substituição"); return; }
+    const rowData = data as any;
+    setSubstituicoes((prev) => [...prev, { id: rowData.id, storeId: rowData.store_id, ingredienteId: rowData.ingrediente_id, substitutoId: rowData.substituto_id, quantidadeSubstituta: Number(rowData.quantidade_substituta), ajustePreco: Number(rowData.ajuste_preco), ativo: rowData.ativo }]);
+    toast.success("Substituição cadastrada");
+  }, []);
+
+  const updateSubstituicao = useCallback<Ctx["updateSubstituicao"]>(async (id, patch) => {
+    const row: any = {};
+    if (patch.quantidadeSubstituta !== undefined) row.quantidade_substituta = patch.quantidadeSubstituta;
+    if (patch.ajustePreco !== undefined) row.ajuste_preco = patch.ajustePreco;
+    if (patch.ativo !== undefined) row.ativo = patch.ativo;
+    const { error } = await supabase.from("ingrediente_substituicoes" as any).update(row).eq("id", id);
+    if (error) toast.error(error.message); else setSubstituicoes((prev) => prev.map((s) => s.id === id ? { ...s, ...patch } : s));
+  }, []);
+
+  const removeSubstituicao = useCallback<Ctx["removeSubstituicao"]>(async (id) => {
+    const { error } = await supabase.from("ingrediente_substituicoes" as any).delete().eq("id", id);
+    if (error) toast.error(error.message); else setSubstituicoes((prev) => prev.filter((s) => s.id !== id));
   }, []);
 
   const baixarEstoque = useCallback<Ctx["baixarEstoque"]>(async (itens) => {
@@ -956,6 +995,10 @@ export function PizzaProvider({ children }: { children: ReactNode }) {
       updateEstoqueItem,
       removeEstoqueItem,
       receitas,
+      substituicoes,
+      addSubstituicao,
+      updateSubstituicao,
+      removeSubstituicao,
       addReceita,
       removeReceita,
       baixarEstoque,

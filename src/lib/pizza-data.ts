@@ -230,6 +230,16 @@ export type ReceitaItem = {
   quantidadeNecessaria: number;
 };
 
+export type IngredienteSubstituicao = {
+  id: string;
+  storeId: string;
+  ingredienteId: string;
+  substitutoId: string;
+  quantidadeSubstituta: number;
+  ajustePreco: number;
+  ativo: boolean;
+};
+
 export type Cliente = {
   id: string;
   nome: string;
