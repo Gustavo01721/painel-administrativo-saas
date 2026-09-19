@@ -455,12 +455,21 @@ export function PizzaProvider({ children }: { children: ReactNode }) {
           prev.some((p) => p.id === c.id) ? prev.map((p) => (p.id === c.id ? c : p)) : [c, ...prev],
         );
       })
+      .on("postgres_changes", { event: "*", schema: "public", table: "estoque" }, () => {
+        void load();
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "receita_itens" }, () => {
+        void load();
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "menu_items" }, () => {
+        void load();
+      })
       .subscribe();
 
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [notify]);
+  }, [load, notify]);
 
   useEffect(() => {
     if (loading || !firstLoad.current) return;
