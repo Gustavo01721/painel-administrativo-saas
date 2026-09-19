@@ -32,17 +32,17 @@ ALTER TABLE receita_itens ENABLE ROW LEVEL SECURITY;
 
 -- Policies estoque
 CREATE POLICY "owner_manager_full_estoque" ON estoque
-  FOR ALL USING (has_role('owner'::app_role, store_id) OR has_role('manager'::app_role, store_id));
+  FOR ALL USING (has_role(auth.uid(), 'owner'::app_role, store_id) OR has_role(auth.uid(), 'manager'::app_role, store_id));
 
 CREATE POLICY "operator_read_estoque" ON estoque
-  FOR SELECT USING (has_role('operator'::app_role, store_id));
+  FOR SELECT USING (has_role(auth.uid(), 'operator'::app_role, store_id));
 
 -- Policies receita_itens
 CREATE POLICY "owner_manager_full_receita" ON receita_itens
-  FOR ALL USING (has_role('owner'::app_role, store_id) OR has_role('manager'::app_role, store_id));
+  FOR ALL USING (has_role(auth.uid(), 'owner'::app_role, store_id) OR has_role(auth.uid(), 'manager'::app_role, store_id));
 
 CREATE POLICY "operator_read_receita" ON receita_itens
-  FOR SELECT USING (has_role('operator'::app_role, store_id));
+  FOR SELECT USING (has_role(auth.uid(), 'operator'::app_role, store_id));
 
 -- Trigger updated_at para estoque
 CREATE TRIGGER set_estoque_updated_at

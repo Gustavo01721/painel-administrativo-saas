@@ -25,10 +25,10 @@ CREATE TABLE IF NOT EXISTS clientes (
 ALTER TABLE clientes ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "owner_manager_full_clientes" ON clientes
-  FOR ALL USING (has_role('owner'::app_role, store_id) OR has_role('manager'::app_role, store_id));
+  FOR ALL USING (has_role(auth.uid(), 'owner'::app_role, store_id) OR has_role(auth.uid(), 'manager'::app_role, store_id));
 
 CREATE POLICY "operator_read_clientes" ON clientes
-  FOR SELECT USING (has_role('operator'::app_role, store_id));
+  FOR SELECT USING (has_role(auth.uid(), 'operator'::app_role, store_id));
 
 -- Trigger updated_at
 CREATE TRIGGER set_clientes_updated_at
@@ -60,10 +60,10 @@ CREATE TABLE IF NOT EXISTS atendente_sessoes (
 ALTER TABLE atendente_sessoes ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "owner_manager_full_atendente" ON atendente_sessoes
-  FOR ALL USING (has_role('owner'::app_role, store_id) OR has_role('manager'::app_role, store_id));
+  FOR ALL USING (has_role(auth.uid(), 'owner'::app_role, store_id) OR has_role(auth.uid(), 'manager'::app_role, store_id));
 
 CREATE POLICY "operator_read_atendente" ON atendente_sessoes
-  FOR SELECT USING (has_role('operator'::app_role, store_id));
+  FOR SELECT USING (has_role(auth.uid(), 'operator'::app_role, store_id));
 
 CREATE TRIGGER set_atendente_sessoes_updated_at
   BEFORE UPDATE ON atendente_sessoes

@@ -18,10 +18,10 @@ CREATE TABLE IF NOT EXISTS estoque_movimentacoes (
 ALTER TABLE estoque_movimentacoes ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "owner_manager_full_movimentacoes" ON estoque_movimentacoes
-  FOR ALL USING (has_role('owner'::app_role, store_id) OR has_role('manager'::app_role, store_id));
+  FOR ALL USING (has_role(auth.uid(), 'owner'::app_role, store_id) OR has_role(auth.uid(), 'manager'::app_role, store_id));
 
 CREATE POLICY "operator_read_movimentacoes" ON estoque_movimentacoes
-  FOR SELECT USING (has_role('operator'::app_role, store_id));
+  FOR SELECT USING (has_role(auth.uid(), 'operator'::app_role, store_id));
 
 -- Índices
 CREATE INDEX IF NOT EXISTS idx_movimentacoes_estoque ON estoque_movimentacoes(estoque_id);
